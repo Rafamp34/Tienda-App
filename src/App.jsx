@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode } from 'lucide-react';
+import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 
 const FONTS = `
@@ -62,6 +62,40 @@ function seedSales() {
     });
   }
   return sales;
+}
+
+function openPrintWindow(html) {
+  const w = window.open('', '_blank');
+  if (!w) { alert('El navegador ha bloqueado la ventana. Permite las ventanas emergentes para exportar.'); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => w.print(), 350);
+}
+
+function reportShell(title, subtitle, bodyHtml) {
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>${title}</title><style>
+    * { box-sizing: border-box; }
+    body { font-family: 'IBM Plex Sans', Arial, sans-serif; color: #21281F; margin: 0; padding: 36px 42px; }
+    h1 { font-family: Georgia, serif; font-size: 22px; margin: 0 0 2px; }
+    .subtitle { font-size: 12px; color: #6B7266; margin-bottom: 26px; }
+    h2 { font-size: 14px; margin: 26px 0 8px; border-bottom: 1px solid #21281F; padding-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 4px; }
+    th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #6B7266; border-bottom: 1px solid #D8D9C9; padding: 5px 4px; }
+    td { padding: 5px 4px; border-bottom: 1px solid #EEEFE4; font-family: 'IBM Plex Mono', monospace; }
+    td:first-child { font-family: inherit; }
+    .num { text-align: right; }
+    .client-block { break-inside: avoid; margin-bottom: 18px; }
+    .client-block h3 { font-size: 13px; margin: 0 0 4px; }
+    .client-total { text-align: right; font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 13px; padding: 4px; }
+    .grand-total { display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid #21281F; margin-top: 20px; padding-top: 10px; font-size: 16px; }
+    .grand-total .amount { font-family: 'IBM Plex Mono', monospace; font-weight: 700; }
+    @media print { @page { margin: 16mm; } }
+  </style></head><body>
+    <h1>Cuaderno de Tienda</h1>
+    <div class="subtitle">${subtitle} · generado el ${new Date().toLocaleDateString('es-ES')}</div>
+    ${bodyHtml}
+  </body></html>`;
 }
 
 export default function TiendaApp() {
@@ -305,6 +339,7 @@ export default function TiendaApp() {
             billingTotal={billingTotal}
             clientMap={clientMap}
             productMap={productMap}
+            sales={sales}
           />
         )}
       </main>
@@ -538,23 +573,85 @@ function Clientes({ clients, clientTotals, onAdd, onDelete }) {
   );
 }
 
-function Facturacion({ month, setMonth, months, billingData, billingTotal, clientMap, productMap }) {
+function Facturacion({ month, setMonth, months, billingData, billingTotal, clientMap, productMap, sales }) {
+  const year = month.slice(0, 4);
+
+  const exportMonth = () => {
+    const rows = billingData.map(({ clientId, items, total }) => `
+      <div class="client-block">
+        <h3>${clientMap[clientId]?.name || 'Cliente'}</h3>
+        <table>
+          <thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Precio</th><th class="num">Subtotal</th></tr></thead>
+          <tbody>
+            ${items.map((s) => `<tr><td>${productMap[s.productId]?.name || '—'}</td><td class="num">${s.qty}</td><td class="num">${eur(s.total / s.qty)}</td><td class="num">${eur(s.total)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="client-total">Total ${clientMap[clientId]?.name || ''}: ${eur(total)}</div>
+      </div>
+    `).join('') || '<p style="color:#6B7266;font-size:13px;">Ninguna venta registrada este mes.</p>';
+
+    const body = `${rows}<div class="grand-total"><span>Total del mes</span><span class="amount">${eur(billingTotal)}</span></div>`;
+    openPrintWindow(reportShell(`Facturación ${monthLabel(month)}`, `Facturación mensual — ${monthLabel(month)}`, body));
+  };
+
+  const exportYear = () => {
+    const yearSales = sales.filter((s) => s.date.slice(0, 4) === year);
+    const byMonth = {};
+    const byClient = {};
+    const byProduct = {};
+    yearSales.forEach((s) => {
+      const mk = s.date.slice(0, 7);
+      byMonth[mk] = (byMonth[mk] || 0) + s.total;
+      byClient[s.clientId] = (byClient[s.clientId] || 0) + s.total;
+      if (!byProduct[s.productId]) byProduct[s.productId] = { qty: 0, total: 0 };
+      byProduct[s.productId].qty += s.qty;
+      byProduct[s.productId].total += s.total;
+    });
+    const yearTotal = yearSales.reduce((sum, s) => sum + s.total, 0);
+
+    const monthRows = Object.entries(byMonth).sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([mk, total]) => `<tr><td>${monthLabel(mk)}</td><td class="num">${eur(total)}</td></tr>`).join('');
+    const clientRows = Object.entries(byClient).sort((a, b) => b[1] - a[1])
+      .map(([id, total]) => `<tr><td>${clientMap[id]?.name || '—'}</td><td class="num">${eur(total)}</td></tr>`).join('');
+    const productRows = Object.entries(byProduct).sort((a, b) => b[1].total - a[1].total)
+      .map(([id, v]) => `<tr><td>${productMap[id]?.name || '—'}</td><td class="num">${v.qty} uds</td><td class="num">${eur(v.total)}</td></tr>`).join('');
+
+    const body = `
+      <h2>Por mes</h2>
+      <table><thead><tr><th>Mes</th><th class="num">Facturación</th></tr></thead><tbody>${monthRows || '<tr><td colspan="2">Sin datos</td></tr>'}</tbody></table>
+      <h2>Por cliente</h2>
+      <table><thead><tr><th>Cliente</th><th class="num">Total comprado</th></tr></thead><tbody>${clientRows || '<tr><td colspan="2">Sin datos</td></tr>'}</tbody></table>
+      <h2>Por producto</h2>
+      <table><thead><tr><th>Producto</th><th class="num">Unidades</th><th class="num">Total</th></tr></thead><tbody>${productRows || '<tr><td colspan="3">Sin datos</td></tr>'}</tbody></table>
+      <div class="grand-total"><span>Total del año ${year}</span><span class="amount">${eur(yearTotal)}</span></div>
+    `;
+    openPrintWindow(reportShell(`Facturación ${year}`, `Facturación anual — ${year}`, body));
+  };
+
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div className="font-display" style={{ fontSize: 20, fontWeight: 600 }}>{monthLabel(month)}</div>
           <div className="font-mono" style={{ fontSize: 12, color: COLORS.inkMuted, marginTop: 2 }}>Total del mes: <strong style={{ color: COLORS.sage }}>{eur(billingTotal)}</strong></div>
         </div>
-        <div style={{ position: 'relative' }}>
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            style={{ appearance: 'none', padding: '9px 32px 9px 14px', borderRadius: 8, border: `1px solid ${COLORS.line}`, background: COLORS.surface, fontSize: 13, cursor: 'pointer' }}
-          >
-            {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
-          </select>
-          <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: 11, pointerEvents: 'none', color: COLORS.inkMuted }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <select
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              style={{ appearance: 'none', padding: '9px 32px 9px 14px', borderRadius: 8, border: `1px solid ${COLORS.line}`, background: COLORS.surface, fontSize: 13, cursor: 'pointer' }}
+            >
+              {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+            <ChevronDown size={14} style={{ position: 'absolute', right: 12, top: 11, pointerEvents: 'none', color: COLORS.inkMuted }} />
+          </div>
+          <button onClick={exportMonth} style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <Download size={14} /> Exportar mes
+          </button>
+          <button onClick={exportYear} style={{ background: COLORS.ink, color: COLORS.paper, border: 'none', borderRadius: 8, padding: '9px 14px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <Download size={14} /> Exportar año {year}
+          </button>
         </div>
       </div>
 
