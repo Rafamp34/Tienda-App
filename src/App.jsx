@@ -421,9 +421,7 @@ export default function TiendaApp() {
         input, select { font-family: 'IBM Plex Sans', sans-serif; }
 
         .app-shell-padded { padding-left: 24px; padding-right: 24px; }
-        .nav-tabs { display: flex; gap: 28px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-        .nav-tabs::-webkit-scrollbar { display: none; }
-        .nav-tabs button { flex-shrink: 0; }
+        .nav-tabs { display: flex; flex-wrap: wrap; row-gap: 18px; gap: 28px; }
         .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
         .resumen-split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
         .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -433,8 +431,12 @@ export default function TiendaApp() {
           .app-shell-padded { padding-left: 16px; padding-right: 16px; }
           .stats-grid { grid-template-columns: repeat(2, 1fr); }
           .resumen-split { grid-template-columns: 1fr; }
-          .nav-tabs { gap: 18px; }
+          .nav-tabs { gap: 16px; row-gap: 16px; }
           h1.font-display, .store-title { font-size: 17px !important; }
+        }
+        @media (max-width: 480px) {
+          .nav-tabs { gap: 12px; }
+          .nav-tabs button { font-size: 13px !important; gap: 4px !important; }
         }
         @media (max-width: 420px) {
           .header-top-row { flex-wrap: wrap; }
