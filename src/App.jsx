@@ -499,6 +499,11 @@ export default function TiendaApp() {
             showToast('Venta registrada');
             return newSales;
           }}
+          onCreateProduct={(barcode, { name, price, stock }) => {
+            const product = { id: 'p' + Date.now(), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: 3, barcode };
+            updateAll([...products, product], clients, sales);
+            return product;
+          }}
         />
       )}
       {productOpen && (
@@ -970,7 +975,7 @@ function ClientModal({ onClose, onSave }) {
   );
 }
 
-function SaleModal({ products, clients, onClose, onSaveCart }) {
+function SaleModal({ products, clients, onClose, onSaveCart, onCreateProduct }) {
   const [clientId, setClientId] = useState(clients[0]?.id || '');
   const [date, setDate] = useState(todayISO());
   const [cart, setCart] = useState([]);
@@ -978,12 +983,16 @@ function SaleModal({ products, clients, onClose, onSaveCart }) {
   const [manualProductId, setManualProductId] = useState(products[0]?.id || '');
   const [manualQty, setManualQty] = useState('1');
   const [error, setError] = useState('');
+  const [pendingBarcode, setPendingBarcode] = useState(null);
+  const [npName, setNpName] = useState('');
+  const [npPrice, setNpPrice] = useState('');
+  const [npStock, setNpStock] = useState('1');
   const [savedCart, setSavedCart] = useState(null);
   const scanRef = useRef(null);
 
   useEffect(() => {
-    if (!savedCart) scanRef.current?.focus();
-  }, [cart, savedCart]);
+    if (!savedCart && !pendingBarcode) scanRef.current?.focus();
+  }, [cart, savedCart, pendingBarcode]);
 
   const addToCart = (productId, qtyToAdd) => {
     const product = products.find((p) => p.id === productId);
@@ -1011,8 +1020,18 @@ function SaleModal({ products, clients, onClose, onSaveCart }) {
     if (product) {
       addToCart(product.id, 1);
     } else {
-      setError(`Código "${code}" no reconocido. Dalo de alta primero desde Inventario → Escanear.`);
+      setError('');
+      setPendingBarcode(code);
     }
+  };
+
+  const handleCreateFromScan = (e) => {
+    e.preventDefault();
+    if (!npName || !npPrice) return;
+    const product = onCreateProduct(pendingBarcode, { name: npName, price: npPrice, stock: npStock });
+    setPendingBarcode(null);
+    setNpName(''); setNpPrice(''); setNpStock('1');
+    addToCart(product.id, 1);
   };
 
   const handleManualAdd = () => {
@@ -1130,6 +1149,24 @@ function SaleModal({ products, clients, onClose, onSaveCart }) {
             <button type="button" onClick={handleManualAdd} style={{ background: COLORS.ink, color: COLORS.paper, border: 'none', borderRadius: 8, padding: '0 14px', fontSize: 13, cursor: 'pointer' }}>+</button>
           </div>
         </details>
+
+        {pendingBarcode && (
+          <form onSubmit={handleCreateFromScan} style={{ background: `${COLORS.amber}12`, border: `1px solid ${COLORS.amber}44`, borderRadius: 8, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 12.5, marginBottom: 10 }}>
+              Código <span className="font-mono">{pendingBarcode}</span> no reconocido. Créalo para añadirlo directamente a esta venta:
+            </div>
+            <label style={labelStyle}>Nombre</label>
+            <input style={inputStyle} value={npName} onChange={(e) => setNpName(e.target.value)} autoFocus required />
+            <label style={labelStyle}>Precio (€)</label>
+            <input style={inputStyle} type="number" step="0.01" min="0" value={npPrice} onChange={(e) => setNpPrice(e.target.value)} required />
+            <label style={labelStyle}>Stock inicial</label>
+            <input style={{ ...inputStyle, marginBottom: 10 }} type="number" min="0" value={npStock} onChange={(e) => setNpStock(e.target.value)} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setPendingBarcode(null)} style={{ flex: 1, background: COLORS.surface, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px', fontSize: 13, cursor: 'pointer' }}>Cancelar</button>
+              <button type="submit" style={{ flex: 1, ...submitStyle }}>Crear y añadir</button>
+            </div>
+          </form>
+        )}
 
         {error && <div style={{ fontSize: 12, color: COLORS.rust, background: `${COLORS.rust}12`, border: `1px solid ${COLORS.rust}33`, borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>{error}</div>}
 
