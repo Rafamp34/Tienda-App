@@ -66,17 +66,18 @@ function seedSales() {
 
 function ticketShell(bodyHtml) {
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;700&display=swap');
     @page { size: 58mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { width: 48mm; margin: 0 auto; padding: 3mm 2mm; font-family: 'Courier New', monospace; font-size: 11px; color: #000; }
+    body { width: 48mm; margin: 0 auto; padding: 3mm 2mm; font-family: 'IBM Plex Mono', 'Courier New', monospace; font-weight: 500; font-size: 12px; color: #000; -webkit-font-smoothing: none; }
     .center { text-align: center; }
-    .line { border-top: 1px dashed #000; margin: 5px 0; }
-    table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-    td { padding: 1px 0; vertical-align: top; }
+    .line { border-top: 1.5px dashed #000; margin: 5px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    td { padding: 1.5px 0; vertical-align: top; font-weight: 500; }
     .num { text-align: right; white-space: nowrap; }
-    .total-row td { border-top: 1px dashed #000; font-weight: bold; padding-top: 5px; font-size: 12px; }
-    h1 { font-size: 13px; margin: 0 0 2px; }
-    .muted { font-size: 9.5px; color: #333; }
+    .total-row td { border-top: 1.5px dashed #000; font-weight: 700; padding-top: 5px; font-size: 13px; }
+    h1 { font-size: 14px; font-weight: 700; margin: 0 0 2px; }
+    .muted { font-size: 10.5px; font-weight: 500; color: #000; }
   </style></head><body>${bodyHtml}</body></html>`;
 }
 
@@ -148,14 +149,15 @@ function barcodeSVG(text, moduleWidth, height) {
 
 function labelShell(bodyHtml) {
   return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@600;700&family=IBM+Plex+Mono:wght@500;700&display=swap');
     @page { size: 58mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { width: 50mm; margin: 0 auto; font-family: 'IBM Plex Sans', Arial, sans-serif; }
+    body { width: 50mm; margin: 0 auto; font-family: 'IBM Plex Sans', Arial, sans-serif; -webkit-font-smoothing: none; }
     .label { padding: 3mm 2mm; text-align: center; page-break-after: always; }
     .label:last-child { page-break-after: auto; }
-    .name { font-size: 11px; font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .price { font-size: 14px; font-weight: 700; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
-    .code-text { font-size: 10px; font-family: 'IBM Plex Mono', monospace; margin-top: 3px; letter-spacing: 1px; }
+    .name { font-size: 12px; font-weight: 700; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .price { font-size: 15px; font-weight: 700; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
+    .code-text { font-size: 11px; font-weight: 500; font-family: 'IBM Plex Mono', monospace; margin-top: 3px; letter-spacing: 1px; }
     svg { display: block; margin: 0 auto; }
   </style></head><body>${bodyHtml}</body></html>`;
 }
