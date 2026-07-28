@@ -548,13 +548,23 @@ export default function TiendaApp() {
               showToast('Venta actualizada');
               return true;
             }}
-            onVoidSale={(saleId) => {
+            onRemoveItem={(saleId) => {
               const sale = sales.find((s) => s.id === saleId);
               if (!sale) return;
               const newProducts = products.map((p) => p.id === sale.productId ? { ...p, stock: p.stock + sale.qty } : p);
               const newSales = sales.filter((s) => s.id !== saleId);
               updateAll(newProducts, clients, newSales);
-              showToast('Venta anulada — stock repuesto');
+              showToast('Producto devuelto — stock repuesto');
+            }}
+            onVoidOrder={(orderId) => {
+              const orderSales = sales.filter((s) => (s.orderId || s.id) === orderId);
+              const newProducts = products.map((p) => {
+                const qty = orderSales.filter((s) => s.productId === p.id).reduce((sum, s) => sum + s.qty, 0);
+                return qty ? { ...p, stock: p.stock + qty } : p;
+              });
+              const newSales = sales.filter((s) => (s.orderId || s.id) !== orderId);
+              updateAll(newProducts, clients, newSales);
+              showToast('Pedido anulado — stock repuesto');
             }}
           />
         )}
@@ -585,9 +595,10 @@ export default function TiendaApp() {
                 return null;
               }
             }
+            const orderId = 'o' + Date.now();
             const newSales = cartItems.map((item, i) => {
               const product = productMap[item.productId];
-              return { id: 's' + Date.now() + '-' + i, clientId, productId: item.productId, qty: item.qty, date, total: +(product.price * item.qty).toFixed(2), cost: +((product.cost || 0) * item.qty).toFixed(2) };
+              return { id: orderId + '-' + i, orderId, clientId, productId: item.productId, qty: item.qty, date, total: +(product.price * item.qty).toFixed(2), cost: +((product.cost || 0) * item.qty).toFixed(2) };
             });
             const newProducts = products.map((p) => {
               const item = cartItems.find((c) => c.productId === p.id);
@@ -1453,14 +1464,24 @@ function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate })
   );
 }
 
-function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, setEditingSale, onEditSale, onVoidSale }) {
-  const filtered = sales
-    .filter((s) => {
-      const q = search.toLowerCase();
-      if (!q) return true;
-      return (clientMap[s.clientId]?.name || '').toLowerCase().includes(q) || (productMap[s.productId]?.name || '').toLowerCase().includes(q);
-    })
-    .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, setEditingSale, onEditSale, onRemoveItem, onVoidOrder }) {
+  const orders = useMemo(() => {
+    const map = {};
+    sales.forEach((s) => {
+      const oid = s.orderId || s.id;
+      if (!map[oid]) map[oid] = { orderId: oid, clientId: s.clientId, date: s.date, items: [] };
+      map[oid].items.push(s);
+    });
+    return Object.values(map).sort((a, b) => (b.date + b.orderId).localeCompare(a.date + a.orderId));
+  }, [sales]);
+
+  const q = search.toLowerCase();
+  const filtered = orders.filter((o) => {
+    if (!q) return true;
+    const clientName = (clientMap[o.clientId]?.name || '').toLowerCase();
+    if (clientName.includes(q)) return true;
+    return o.items.some((it) => (productMap[it.productId]?.name || '').toLowerCase().includes(q));
+  });
 
   return (
     <div>
@@ -1474,32 +1495,54 @@ function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, 
         />
       </div>
 
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr 0.7fr 1fr 70px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
-          <span>Fecha</span><span>Cliente</span><span>Producto</span><span>Cant.</span><span>Total</span><span></span>
+      {filtered.length === 0 ? (
+        <Card><div style={{ color: COLORS.inkMuted, fontSize: 13 }}>No hay pedidos que coincidan.</div></Card>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 20 }}>
+          {filtered.map((o) => {
+            const total = o.items.reduce((sum, it) => sum + it.total, 0);
+            return (
+              <div key={o.orderId} className="receipt" style={{ padding: '22px 20px 16px', borderRadius: 4 }}>
+                <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                  <div className="font-display" style={{ fontWeight: 600, fontSize: 16 }}>{clientMap[o.clientId]?.name || 'Cliente'}</div>
+                  <div className="font-mono" style={{ fontSize: 10, color: COLORS.inkMuted, letterSpacing: '0.08em', marginTop: 2 }}>{new Date(o.date).toLocaleDateString('es-ES').toUpperCase()}</div>
+                </div>
+                <div style={{ borderTop: `1.5px dashed ${COLORS.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {o.items.map((it) => {
+                    const p = productMap[it.productId];
+                    return (
+                      <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5 }}>
+                        <span style={{ flex: 1 }}>{p?.name || '—'} {it.qty > 1 ? `×${it.qty}` : ''}</span>
+                        <span className="font-mono">{eur(it.total)}</span>
+                        <button onClick={() => setEditingSale(it)} title="Editar cantidad" style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted, padding: 2 }}>
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => { if (window.confirm(`¿Devolver "${p?.name || 'este producto'}"? Se repondrá el stock.`)) onRemoveItem(it.id); }}
+                          title="Devolver este producto"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted, padding: 2 }}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ borderTop: `1.5px dashed ${COLORS.line}`, marginTop: 14, paddingTop: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</span>
+                  <span className="font-mono" style={{ fontWeight: 700, fontSize: 16 }}>{eur(total)}</span>
+                </div>
+                <button
+                  onClick={() => { if (window.confirm('¿Anular todo el pedido? Se repondrá el stock de todos los productos.')) onVoidOrder(o.orderId); }}
+                  style={{ width: '100%', marginTop: 12, background: 'none', border: `1px solid ${COLORS.rust}55`, color: COLORS.rust, borderRadius: 6, padding: '6px', fontSize: 11.5, cursor: 'pointer' }}
+                >
+                  Anular pedido completo
+                </button>
+              </div>
+            );
+          })}
         </div>
-        {filtered.length === 0 && <div style={{ padding: 24, color: COLORS.inkMuted, fontSize: 13 }}>No hay ventas que coincidan.</div>}
-        {filtered.map((s) => (
-          <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr 0.7fr 1fr 70px', padding: '12px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 13.5 }}>
-            <span className="font-mono" style={{ fontSize: 12.5 }}>{new Date(s.date).toLocaleDateString('es-ES')}</span>
-            <span>{clientMap[s.clientId]?.name || '—'}</span>
-            <span>{productMap[s.productId]?.name || '—'}</span>
-            <span className="font-mono">{s.qty}</span>
-            <span className="font-mono" style={{ fontWeight: 600 }}>{eur(s.total)}</span>
-            <span style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => setEditingSale(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
-                <Pencil size={14} />
-              </button>
-              <button
-                onClick={() => { if (window.confirm('¿Anular esta venta? Se repondrá el stock del producto.')) onVoidSale(s.id); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}
-              >
-                <Trash2 size={15} />
-              </button>
-            </span>
-          </div>
-        ))}
-      </Card>
+      )}
 
       {editingSale && (
         <EditSaleModal
