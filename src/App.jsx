@@ -99,6 +99,28 @@ function printSaleTicket(sale, product, client) {
   openPrintWindow(ticketShell(body));
 }
 
+function printCartTicket(salesArr, products, client) {
+  const total = salesArr.reduce((sum, s) => sum + s.total, 0);
+  const rows = salesArr.map((s) => {
+    const p = products.find((x) => x.id === s.productId);
+    const unit = p ? p.price : s.total / s.qty;
+    return `<tr><td colspan="2">${p?.name || '—'}</td></tr><tr><td>${s.qty} x ${eur(unit)}</td><td class="num">${eur(s.total)}</td></tr>`;
+  }).join('');
+  const body = `
+    <div class="center">
+      <h1>Cuaderno de Tienda</h1>
+      <div class="muted">${new Date(salesArr[0]?.date || todayISO()).toLocaleDateString('es-ES')}</div>
+    </div>
+    <div class="line"></div>
+    <table>${rows}</table>
+    <table><tr class="total-row"><td>TOTAL</td><td class="num">${eur(total)}</td></tr></table>
+    <div class="line"></div>
+    <div class="center muted">${client ? client.name : 'Cliente sin registrar'}</div>
+    <div class="center muted" style="margin-top:8px;">¡Gracias por su compra!</div>
+  `;
+  openPrintWindow(ticketShell(body));
+}
+
 
 function openPrintWindow(html) {
   const w = window.open('', '_blank');
@@ -457,14 +479,25 @@ export default function TiendaApp() {
           products={products}
           clients={clients}
           onClose={() => setSaleOpen(false)}
-          onSave={(sale) => {
-            const product = productMap[sale.productId];
-            if (!product || product.stock < sale.qty) { showToast('Stock insuficiente'); return false; }
-            const newSales = [...sales, sale];
-            const newProducts = products.map((p) => p.id === sale.productId ? { ...p, stock: p.stock - sale.qty } : p);
-            updateAll(newProducts, clients, newSales);
+          onSaveCart={(cartItems, clientId, date) => {
+            for (const item of cartItems) {
+              const product = productMap[item.productId];
+              if (!product || product.stock < item.qty) {
+                showToast(`Stock insuficiente: ${product?.name || item.productId}`);
+                return null;
+              }
+            }
+            const newSales = cartItems.map((item, i) => {
+              const product = productMap[item.productId];
+              return { id: 's' + Date.now() + '-' + i, clientId, productId: item.productId, qty: item.qty, date, total: +(product.price * item.qty).toFixed(2) };
+            });
+            const newProducts = products.map((p) => {
+              const item = cartItems.find((c) => c.productId === p.id);
+              return item ? { ...p, stock: p.stock - item.qty } : p;
+            });
+            updateAll(newProducts, clients, [...sales, ...newSales]);
             showToast('Venta registrada');
-            return true;
+            return newSales;
           }}
         />
       )}
@@ -937,36 +970,108 @@ function ClientModal({ onClose, onSave }) {
   );
 }
 
-function SaleModal({ products, clients, onClose, onSave }) {
+function SaleModal({ products, clients, onClose, onSaveCart }) {
   const [clientId, setClientId] = useState(clients[0]?.id || '');
-  const [productId, setProductId] = useState(products[0]?.id || '');
-  const [qty, setQty] = useState('1');
   const [date, setDate] = useState(todayISO());
-  const [savedSale, setSavedSale] = useState(null);
-  const product = products.find((p) => p.id === productId);
+  const [cart, setCart] = useState([]);
+  const [scanValue, setScanValue] = useState('');
+  const [manualProductId, setManualProductId] = useState(products[0]?.id || '');
+  const [manualQty, setManualQty] = useState('1');
+  const [error, setError] = useState('');
+  const [savedCart, setSavedCart] = useState(null);
+  const scanRef = useRef(null);
+
+  useEffect(() => {
+    if (!savedCart) scanRef.current?.focus();
+  }, [cart, savedCart]);
+
+  const addToCart = (productId, qtyToAdd) => {
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    const existing = cart.find((c) => c.productId === productId);
+    const newQty = (existing?.qty || 0) + qtyToAdd;
+    if (newQty > product.stock) {
+      setError(`Stock insuficiente de "${product.name}" (disponible: ${product.stock})`);
+      return;
+    }
+    setError('');
+    if (existing) {
+      setCart(cart.map((c) => c.productId === productId ? { ...c, qty: newQty } : c));
+    } else {
+      setCart([...cart, { productId, qty: newQty }]);
+    }
+  };
+
+  const handleScan = (e) => {
+    e.preventDefault();
+    const code = scanValue.trim();
+    setScanValue('');
+    if (!code) return;
+    const product = products.find((p) => p.barcode === code);
+    if (product) {
+      addToCart(product.id, 1);
+    } else {
+      setError(`Código "${code}" no reconocido. Dalo de alta primero desde Inventario → Escanear.`);
+    }
+  };
+
+  const handleManualAdd = () => {
+    if (!manualProductId) return;
+    addToCart(manualProductId, parseInt(manualQty || '1'));
+  };
+
+  const updateQty = (productId, delta) => {
+    const product = products.find((p) => p.id === productId);
+    setCart((prev) => prev
+      .map((c) => {
+        if (c.productId !== productId) return c;
+        const newQty = c.qty + delta;
+        if (newQty > (product?.stock || 0)) { setError(`Stock insuficiente de "${product?.name}"`); return c; }
+        setError('');
+        return { ...c, qty: newQty };
+      })
+      .filter((c) => c.qty > 0));
+  };
+
+  const removeFromCart = (productId) => setCart(cart.filter((c) => c.productId !== productId));
+
+  const cartTotal = cart.reduce((sum, c) => {
+    const p = products.find((x) => x.id === c.productId);
+    return sum + (p ? p.price * c.qty : 0);
+  }, 0);
 
   const resetForNewSale = () => {
-    setSavedSale(null);
-    setQty('1');
+    setSavedCart(null);
+    setCart([]);
     setDate(todayISO());
   };
 
-  if (savedSale) {
-    const savedProduct = products.find((p) => p.id === savedSale.productId);
-    const savedClient = clients.find((c) => c.id === savedSale.clientId);
+  const handleRegister = () => {
+    if (!clientId) { setError('Selecciona un cliente.'); return; }
+    if (cart.length === 0) { setError('Añade al menos un producto al carrito.'); return; }
+    const result = onSaveCart(cart, clientId, date);
+    if (result) setSavedCart(result);
+  };
+
+  if (savedCart) {
+    const savedClient = clients.find((c) => c.id === clientId);
+    const total = savedCart.reduce((sum, s) => sum + s.total, 0);
     return (
       <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
-        <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 360, maxWidth: '100%' }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 380, maxWidth: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <div className="font-display" style={{ fontSize: 17, fontWeight: 600 }}>Venta registrada</div>
             <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={18} /></button>
           </div>
           <div style={{ background: `${COLORS.sage}12`, border: `1px solid ${COLORS.sage}33`, borderRadius: 8, padding: 14, marginBottom: 18, fontSize: 13 }}>
-            <div>{savedProduct?.name} × {savedSale.qty}</div>
-            <div style={{ color: COLORS.inkMuted, fontSize: 12, marginTop: 2 }}>{savedClient?.name}</div>
-            <div className="font-mono" style={{ fontWeight: 700, fontSize: 16, marginTop: 6 }}>{eur(savedSale.total)}</div>
+            {savedCart.map((s) => {
+              const p = products.find((x) => x.id === s.productId);
+              return <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}><span>{p?.name} × {s.qty}</span><span className="font-mono">{eur(s.total)}</span></div>;
+            })}
+            <div style={{ color: COLORS.inkMuted, fontSize: 12, marginTop: 6 }}>{savedClient?.name}</div>
+            <div className="font-mono" style={{ fontWeight: 700, fontSize: 16, marginTop: 6, borderTop: `1px solid ${COLORS.sage}33`, paddingTop: 6 }}>{eur(total)}</div>
           </div>
-          <button onClick={() => printSaleTicket(savedSale, savedProduct, savedClient)} style={{ ...submitStyle, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <button onClick={() => printCartTicket(savedCart, products, savedClient)} style={{ ...submitStyle, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             🖨️ Imprimir ticket
           </button>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -978,36 +1083,86 @@ function SaleModal({ products, clients, onClose, onSave }) {
     );
   }
 
+  if (clients.length === 0 || products.length === 0) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 360, maxWidth: '100%' }}>
+          <div style={{ fontSize: 13, color: COLORS.inkMuted }}>Necesitas al menos un cliente y un producto antes de registrar una venta.</div>
+          <button type="button" onClick={onClose} style={{ ...submitStyle, marginTop: 14 }}>Cerrar</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <ModalShell title="Registrar venta" onClose={onClose} onSubmit={(e) => {
-      e.preventDefault();
-      if (!clientId || !productId) return;
-      const q = parseInt(qty || '1');
-      const sale = { id: 's' + Date.now(), clientId, productId, qty: q, date, total: +(product.price * q).toFixed(2) };
-      const ok = onSave(sale);
-      if (ok) setSavedSale(sale);
-    }}>
-      {clients.length === 0 || products.length === 0 ? (
-        <div style={{ fontSize: 13, color: COLORS.inkMuted, marginBottom: 14 }}>Necesitas al menos un cliente y un producto antes de registrar una venta.</div>
-      ) : (
-        <>
-          <label style={labelStyle}>Cliente</label>
-          <select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}>
-            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <label style={labelStyle}>Producto</label>
-          <select style={inputStyle} value={productId} onChange={(e) => setProductId(e.target.value)}>
-            {products.map((p) => <option key={p.id} value={p.id}>{p.name} — {eur(p.price)} ({p.stock} uds)</option>)}
-          </select>
-          <label style={labelStyle}>Cantidad</label>
-          <input style={inputStyle} type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} />
-          <label style={labelStyle}>Fecha</label>
-          <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          {product && <div style={{ fontSize: 13, color: COLORS.inkMuted, marginBottom: 14 }}>Total: <strong className="font-mono" style={{ color: COLORS.ink }}>{eur(product.price * parseInt(qty || '0'))}</strong></div>}
-          <button style={submitStyle} type="submit"><ShoppingCart size={14} style={{ marginRight: 6, verticalAlign: -2 }} />Registrar</button>
-        </>
-      )}
-    </ModalShell>
+    <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 420, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div className="font-display" style={{ fontSize: 17, fontWeight: 600 }}>Registrar venta</div>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={18} /></button>
+        </div>
+
+        <label style={labelStyle}>Cliente</label>
+        <select style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}>
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <label style={labelStyle}>Fecha</label>
+        <input style={inputStyle} type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+
+        <form onSubmit={handleScan} style={{ marginBottom: 12 }}>
+          <label style={labelStyle}>Escanear producto</label>
+          <input
+            ref={scanRef}
+            value={scanValue}
+            onChange={(e) => setScanValue(e.target.value)}
+            placeholder="Esperando código…"
+            style={{ ...inputStyle, marginBottom: 0, fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, textAlign: 'center' }}
+          />
+        </form>
+
+        <details style={{ marginBottom: 14 }}>
+          <summary style={{ fontSize: 12, color: COLORS.inkMuted, cursor: 'pointer', marginBottom: 8 }}>Añadir manualmente</summary>
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <select style={{ ...inputStyle, marginBottom: 0, flex: 2 }} value={manualProductId} onChange={(e) => setManualProductId(e.target.value)}>
+              {products.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.stock} uds)</option>)}
+            </select>
+            <input style={{ ...inputStyle, marginBottom: 0, flex: 1 }} type="number" min="1" value={manualQty} onChange={(e) => setManualQty(e.target.value)} />
+            <button type="button" onClick={handleManualAdd} style={{ background: COLORS.ink, color: COLORS.paper, border: 'none', borderRadius: 8, padding: '0 14px', fontSize: 13, cursor: 'pointer' }}>+</button>
+          </div>
+        </details>
+
+        {error && <div style={{ fontSize: 12, color: COLORS.rust, background: `${COLORS.rust}12`, border: `1px solid ${COLORS.rust}33`, borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>{error}</div>}
+
+        <div style={{ border: `1px solid ${COLORS.line}`, borderRadius: 8, marginBottom: 14, overflow: 'hidden' }}>
+          {cart.length === 0 ? (
+            <div style={{ padding: 16, fontSize: 12.5, color: COLORS.inkMuted, textAlign: 'center' }}>Carrito vacío — escanea o añade productos.</div>
+          ) : (
+            cart.map((c) => {
+              const p = products.find((x) => x.id === c.productId);
+              return (
+                <div key={c.productId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: `1px solid ${COLORS.line}`, fontSize: 13 }}>
+                  <span style={{ flex: 1 }}>{p?.name}</span>
+                  <button type="button" onClick={() => updateQty(c.productId, -1)} style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>−</button>
+                  <span className="font-mono" style={{ width: 20, textAlign: 'center' }}>{c.qty}</span>
+                  <button type="button" onClick={() => updateQty(c.productId, 1)} style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>+</button>
+                  <span className="font-mono" style={{ width: 60, textAlign: 'right' }}>{p ? eur(p.price * c.qty) : ''}</span>
+                  <button type="button" onClick={() => removeFromCart(c.productId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={14} /></button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 14 }}>
+          <span style={{ fontSize: 12, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</span>
+          <span className="font-mono" style={{ fontWeight: 700, fontSize: 18 }}>{eur(cartTotal)}</span>
+        </div>
+
+        <button onClick={handleRegister} style={submitStyle}>
+          <ShoppingCart size={14} style={{ marginRight: 6, verticalAlign: -2 }} />Registrar venta
+        </button>
+      </div>
+    </div>
   );
 }
 
