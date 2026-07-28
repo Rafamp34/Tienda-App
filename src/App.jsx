@@ -419,18 +419,38 @@ export default function TiendaApp() {
           background: ${COLORS.amber};
         }
         input, select { font-family: 'IBM Plex Sans', sans-serif; }
+
+        .app-shell-padded { padding-left: 24px; padding-right: 24px; }
+        .nav-tabs { display: flex; gap: 28px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .nav-tabs::-webkit-scrollbar { display: none; }
+        .nav-tabs button { flex-shrink: 0; }
+        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
+        .resumen-split { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+        .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .header-top-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; gap: 12px; }
+
+        @media (max-width: 720px) {
+          .app-shell-padded { padding-left: 16px; padding-right: 16px; }
+          .stats-grid { grid-template-columns: repeat(2, 1fr); }
+          .resumen-split { grid-template-columns: 1fr; }
+          .nav-tabs { gap: 18px; }
+          h1.font-display, .store-title { font-size: 17px !important; }
+        }
+        @media (max-width: 420px) {
+          .header-top-row { flex-wrap: wrap; }
+        }
       `}</style>
 
       {/* Header */}
       <header style={{ borderBottom: `1px solid ${COLORS.line}` }}>
-        <div style={{ maxWidth: 1080, margin: '0 auto', padding: '20px 24px 0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 22 }}>
+        <div className="app-shell-padded" style={{ maxWidth: 1080, margin: '0 auto', paddingTop: 20 }}>
+          <div className="header-top-row">
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 8, background: COLORS.ink, color: COLORS.paper, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, background: COLORS.ink, color: COLORS.paper, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <Receipt size={18} />
               </div>
               <div>
-                <div className="font-display" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1 }}>Cuaderno de Tienda</div>
+                <div className="font-display store-title" style={{ fontSize: 20, fontWeight: 600, lineHeight: 1 }}>Cuaderno de Tienda</div>
                 <div className="font-mono" style={{ fontSize: 11, color: COLORS.inkMuted, marginTop: 2 }}>gestión diaria</div>
               </div>
             </div>
@@ -451,7 +471,7 @@ export default function TiendaApp() {
               </button>
             </div>
           </div>
-          <nav style={{ display: 'flex', gap: 28 }}>
+          <nav className="nav-tabs">
             {[
               ['resumen', 'Resumen', TrendingUp],
               ['inventario', 'Inventario', Package],
@@ -463,7 +483,7 @@ export default function TiendaApp() {
                 key={key}
                 className={`tab-btn ${tab === key ? 'active' : ''}`}
                 onClick={() => setTab(key)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 6, color: tab === key ? COLORS.ink : COLORS.inkMuted, fontWeight: tab === key ? 600 : 400, fontSize: 14 }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 6, color: tab === key ? COLORS.ink : COLORS.inkMuted, fontWeight: tab === key ? 600 : 400, fontSize: 14, whiteSpace: 'nowrap' }}
               >
                 <Icon size={15} /> {label}
               </button>
@@ -474,7 +494,7 @@ export default function TiendaApp() {
 
       {backupOverdue && !bannerDismissed && (
         <div style={{ background: `${COLORS.amber}14`, borderBottom: `1px solid ${COLORS.amber}44` }}>
-          <div style={{ maxWidth: 1080, margin: '0 auto', padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div className="app-shell-padded" style={{ maxWidth: 1080, margin: '0 auto', paddingTop: 10, paddingBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertTriangle size={15} color={COLORS.amber} />
               {daysSinceBackup === null ? 'Todavía no has hecho ninguna copia de seguridad.' : `Han pasado ${daysSinceBackup} días desde tu última copia de seguridad.`}
@@ -487,7 +507,7 @@ export default function TiendaApp() {
         </div>
       )}
 
-      <main style={{ maxWidth: 1080, margin: '0 auto', padding: '28px 24px 60px' }}>
+      <main className="app-shell-padded" style={{ maxWidth: 1080, margin: '0 auto', paddingTop: 28, paddingBottom: 60 }}>
         {tab === 'resumen' && (
           <Resumen
             monthRevenue={monthRevenue}
@@ -696,7 +716,7 @@ function Resumen({ monthRevenue, monthMargin, monthSalesCount, avgTicket, lowSto
         <span className="font-mono" style={{ fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Este mes</span>
         <span style={{ height: 1, flex: 1, background: COLORS.line }} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 20 }}>
+      <div className="stats-grid">
         <Card>
           <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 6 }}>Facturación</div>
           <div className="font-mono" style={{ fontSize: 26, fontWeight: 600, color: COLORS.sage }}>{eur(monthRevenue)}</div>
@@ -716,7 +736,7 @@ function Resumen({ monthRevenue, monthMargin, monthSalesCount, avgTicket, lowSto
         </Card>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="resumen-split">
         <Card>
           <div className="font-display" style={{ fontSize: 15, fontWeight: 600, marginBottom: 14 }}>Ventas por día</div>
           {chartData.length === 0 ? (
@@ -817,14 +837,15 @@ function Inventario({ products, search, setSearch, categoryFilter, setCategoryFi
       </div>
 
       <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
+        <div className="table-scroll">
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}`, minWidth: 560 }}>
           <span>Producto</span><span>Precio</span><span>Coste</span><span>Stock</span><span>Estado</span><span></span>
         </div>
         {filtered.length === 0 && <div style={{ padding: 24, color: COLORS.inkMuted, fontSize: 13 }}>No hay productos.</div>}
         {filtered.map((p) => {
           const low = p.stock <= p.minStock;
           return (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14 }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14, minWidth: 560 }}>
               <span>
                 {p.name}
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
@@ -854,6 +875,7 @@ function Inventario({ products, search, setSearch, categoryFilter, setCategoryFi
             </div>
           );
         })}
+        </div>
       </Card>
     </div>
   );
@@ -1058,7 +1080,7 @@ function ModalShell({ title, onClose, children, onSubmit }) {
       <form
         onSubmit={onSubmit}
         onClick={(e) => e.stopPropagation()}
-        style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 360, maxWidth: '100%' }}
+        style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 360, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
           <div className="font-display" style={{ fontSize: 17, fontWeight: 600 }}>{title}</div>
@@ -1336,13 +1358,13 @@ function SaleModal({ products, clients, onClose, onSaveCart, onCreateProduct }) 
             cart.map((c) => {
               const p = products.find((x) => x.id === c.productId);
               return (
-                <div key={c.productId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 12px', borderBottom: `1px solid ${COLORS.line}`, fontSize: 13 }}>
-                  <span style={{ flex: 1 }}>{p?.name}</span>
-                  <button type="button" onClick={() => updateQty(c.productId, -1)} style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>−</button>
-                  <span className="font-mono" style={{ width: 20, textAlign: 'center' }}>{c.qty}</span>
-                  <button type="button" onClick={() => updateQty(c.productId, 1)} style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>+</button>
-                  <span className="font-mono" style={{ width: 60, textAlign: 'right' }}>{p ? eur(p.price * c.qty) : ''}</span>
-                  <button type="button" onClick={() => removeFromCart(c.productId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={14} /></button>
+                <div key={c.productId} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderBottom: `1px solid ${COLORS.line}`, fontSize: 13 }}>
+                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p?.name}</span>
+                  <button type="button" onClick={() => updateQty(c.productId, -1)} style={{ flexShrink: 0, background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>−</button>
+                  <span className="font-mono" style={{ flexShrink: 0, width: 18, textAlign: 'center' }}>{c.qty}</span>
+                  <button type="button" onClick={() => updateQty(c.productId, 1)} style={{ flexShrink: 0, background: COLORS.paper, border: `1px solid ${COLORS.line}`, borderRadius: 5, width: 22, height: 22, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>+</button>
+                  <span className="font-mono" style={{ flexShrink: 0, width: 54, textAlign: 'right' }}>{p ? eur(p.price * c.qty) : ''}</span>
+                  <button type="button" onClick={() => removeFromCart(c.productId)} style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={14} /></button>
                 </div>
               );
             })
