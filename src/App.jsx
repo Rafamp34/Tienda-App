@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil, Tag } from 'lucide-react';
+import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil, Tag, LogOut } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 
 const FONTS = `
@@ -457,6 +457,13 @@ export default function TiendaApp() {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => { if (window.confirm('¿Cerrar sesión?')) window.location.href = '/logout'; }}
+                title="Cerrar sesión"
+                style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                <LogOut size={16} />
+              </button>
               <button
                 onClick={() => setBackupOpen(true)}
                 title="Copia de seguridad"
