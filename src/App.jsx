@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download } from 'lucide-react';
+import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 
 const FONTS = `
@@ -64,6 +64,42 @@ function seedSales() {
   return sales;
 }
 
+function ticketShell(bodyHtml) {
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><style>
+    @page { size: 58mm auto; margin: 0; }
+    * { box-sizing: border-box; }
+    body { width: 48mm; margin: 0 auto; padding: 3mm 2mm; font-family: 'Courier New', monospace; font-size: 11px; color: #000; }
+    .center { text-align: center; }
+    .line { border-top: 1px dashed #000; margin: 5px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    td { padding: 1px 0; vertical-align: top; }
+    .num { text-align: right; white-space: nowrap; }
+    .total-row td { border-top: 1px dashed #000; font-weight: bold; padding-top: 5px; font-size: 12px; }
+    h1 { font-size: 13px; margin: 0 0 2px; }
+    .muted { font-size: 9.5px; color: #333; }
+  </style></head><body>${bodyHtml}</body></html>`;
+}
+
+function printSaleTicket(sale, product, client) {
+  const body = `
+    <div class="center">
+      <h1>Cuaderno de Tienda</h1>
+      <div class="muted">${new Date(sale.date).toLocaleDateString('es-ES')}</div>
+    </div>
+    <div class="line"></div>
+    <table>
+      <tr><td colspan="2">${product?.name || '—'}</td></tr>
+      <tr><td>${sale.qty} x ${eur((product?.price) ?? (sale.total / sale.qty))}</td><td class="num">${eur(sale.total)}</td></tr>
+    </table>
+    <table><tr class="total-row"><td>TOTAL</td><td class="num">${eur(sale.total)}</td></tr></table>
+    <div class="line"></div>
+    <div class="center muted">${client ? client.name : 'Cliente sin registrar'}</div>
+    <div class="center muted" style="margin-top:8px;">¡Gracias por su compra!</div>
+  `;
+  openPrintWindow(ticketShell(body));
+}
+
+
 function openPrintWindow(html) {
   const w = window.open('', '_blank');
   if (!w) { alert('El navegador ha bloqueado la ventana. Permite las ventanas emergentes para exportar.'); return; }
@@ -106,8 +142,12 @@ export default function TiendaApp() {
   const [tab, setTab] = useState('resumen');
   const [saleOpen, setSaleOpen] = useState(false);
   const [productOpen, setProductOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
   const [clientOpen, setClientOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [lastBackup, setLastBackup] = useState(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
   const [billingMonth, setBillingMonth] = useState(new Date().toISOString().slice(0, 7));
   const [productSearch, setProductSearch] = useState('');
   const [toast, setToast] = useState('');
@@ -129,6 +169,12 @@ export default function TiendaApp() {
       }
       setLoading(false);
     })();
+    (async () => {
+      try {
+        const res = await window.storage.get('last-backup-date', false);
+        setLastBackup(res.value);
+      } catch {}
+    })();
   }, []);
 
   const persist = async (next) => {
@@ -143,6 +189,42 @@ export default function TiendaApp() {
   const updateAll = (p, c, s) => {
     setProducts(p); setClients(c); setSales(s);
     persist({ products: p, clients: c, sales: s });
+  };
+
+  const daysSinceBackup = lastBackup ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000) : null;
+  const backupOverdue = daysSinceBackup === null || daysSinceBackup >= 7;
+
+  const downloadBackup = () => {
+    const payload = JSON.stringify({ products, clients, sales, exportedAt: new Date().toISOString() }, null, 2);
+    const blob = new Blob([payload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `copia-tienda-${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    const today = todayISO();
+    setLastBackup(today);
+    window.storage.set('last-backup-date', today, false).catch(() => {});
+    showToast('Copia descargada — súbela a tu carpeta de Drive');
+  };
+
+  const restoreBackup = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!Array.isArray(data.products) || !Array.isArray(data.clients) || !Array.isArray(data.sales)) throw new Error('formato inválido');
+        updateAll(data.products, data.clients, data.sales);
+        showToast('Copia restaurada correctamente');
+        setBackupOpen(false);
+      } catch {
+        showToast('El archivo no es una copia válida');
+      }
+    };
+    reader.readAsText(file);
   };
 
   const currentMonth = new Date().toISOString().slice(0, 7);
@@ -268,12 +350,22 @@ export default function TiendaApp() {
                 <div className="font-mono" style={{ fontSize: 11, color: COLORS.inkMuted, marginTop: 2 }}>gestión diaria</div>
               </div>
             </div>
-            <button
-              onClick={() => setSaleOpen(true)}
-              style={{ background: COLORS.amber, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500, cursor: 'pointer' }}
-            >
-              <Plus size={16} /> Nueva venta
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                onClick={() => setBackupOpen(true)}
+                title="Copia de seguridad"
+                style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}`, borderRadius: 8, width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', position: 'relative' }}
+              >
+                <Cloud size={17} />
+                {backupOverdue && <span style={{ position: 'absolute', top: -3, right: -3, width: 9, height: 9, borderRadius: '50%', background: COLORS.rust, border: `2px solid ${COLORS.paper}` }} />}
+              </button>
+              <button
+                onClick={() => setSaleOpen(true)}
+                style={{ background: COLORS.amber, color: '#fff', border: 'none', borderRadius: 8, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 8, fontWeight: 500, cursor: 'pointer' }}
+              >
+                <Plus size={16} /> Nueva venta
+              </button>
+            </div>
           </div>
           <nav style={{ display: 'flex', gap: 28 }}>
             {[
@@ -295,6 +387,21 @@ export default function TiendaApp() {
         </div>
       </header>
 
+      {backupOverdue && !bannerDismissed && (
+        <div style={{ background: `${COLORS.amber}14`, borderBottom: `1px solid ${COLORS.amber}44` }}>
+          <div style={{ maxWidth: 1080, margin: '0 auto', padding: '10px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertTriangle size={15} color={COLORS.amber} />
+              {daysSinceBackup === null ? 'Todavía no has hecho ninguna copia de seguridad.' : `Han pasado ${daysSinceBackup} días desde tu última copia de seguridad.`}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={downloadBackup} style={{ background: COLORS.ink, color: COLORS.paper, border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 500, cursor: 'pointer' }}>Descargar copia ahora</button>
+              <button onClick={() => setBannerDismissed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={15} /></button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main style={{ maxWidth: 1080, margin: '0 auto', padding: '28px 24px 60px' }}>
         {tab === 'resumen' && (
           <Resumen
@@ -311,7 +418,8 @@ export default function TiendaApp() {
             products={products}
             search={productSearch}
             setSearch={setProductSearch}
-            onAdd={() => setProductOpen(true)}
+            onAdd={() => { setEditingProduct(null); setProductOpen(true); }}
+            onEdit={(p) => { setEditingProduct(p); setProductOpen(true); }}
             onScan={() => setScannerOpen(true)}
             onDelete={(id) => {
               if (sales.some((s) => s.productId === id)) { showToast('No se puede borrar: tiene ventas asociadas'); return; }
@@ -351,19 +459,28 @@ export default function TiendaApp() {
           onClose={() => setSaleOpen(false)}
           onSave={(sale) => {
             const product = productMap[sale.productId];
-            if (!product || product.stock < sale.qty) { showToast('Stock insuficiente'); return; }
+            if (!product || product.stock < sale.qty) { showToast('Stock insuficiente'); return false; }
             const newSales = [...sales, sale];
             const newProducts = products.map((p) => p.id === sale.productId ? { ...p, stock: p.stock - sale.qty } : p);
             updateAll(newProducts, clients, newSales);
-            setSaleOpen(false);
             showToast('Venta registrada');
+            return true;
           }}
         />
       )}
       {productOpen && (
         <ProductModal
-          onClose={() => setProductOpen(false)}
-          onSave={(p) => { updateAll([...products, p], clients, sales); setProductOpen(false); }}
+          initialProduct={editingProduct}
+          onClose={() => { setProductOpen(false); setEditingProduct(null); }}
+          onSave={(p) => {
+            if (editingProduct) {
+              updateAll(products.map((x) => x.id === p.id ? p : x), clients, sales);
+            } else {
+              updateAll([...products, p], clients, sales);
+            }
+            setProductOpen(false);
+            setEditingProduct(null);
+          }}
         />
       )}
       {clientOpen && (
@@ -380,11 +497,25 @@ export default function TiendaApp() {
             const next = products.map((p) => p.id === id ? { ...p, stock: p.stock + 1 } : p);
             updateAll(next, clients, sales);
           }}
+          onDecrement={(id) => {
+            const next = products.map((p) => p.id === id ? { ...p, stock: Math.max(0, p.stock - 1) } : p);
+            updateAll(next, clients, sales);
+          }}
           onCreate={(barcode, { name, price, stock }) => {
             const product = { id: 'p' + Date.now(), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: 3, barcode };
             updateAll([...products, product], clients, sales);
             return product;
           }}
+        />
+      )}
+
+      {backupOpen && (
+        <BackupModal
+          lastBackup={lastBackup}
+          daysSinceBackup={daysSinceBackup}
+          onClose={() => setBackupOpen(false)}
+          onDownload={downloadBackup}
+          onRestore={restoreBackup}
         />
       )}
 
@@ -488,7 +619,7 @@ function Resumen({ monthRevenue, monthSalesCount, avgTicket, lowStock, topProduc
   );
 }
 
-function Inventario({ products, search, setSearch, onAdd, onScan, onDelete }) {
+function Inventario({ products, search, setSearch, onAdd, onEdit, onScan, onDelete }) {
   const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
   return (
     <div>
@@ -513,14 +644,14 @@ function Inventario({ products, search, setSearch, onAdd, onScan, onDelete }) {
       </div>
 
       <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 40px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 68px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
           <span>Producto</span><span>Precio</span><span>Stock</span><span>Estado</span><span></span>
         </div>
         {filtered.length === 0 && <div style={{ padding: 24, color: COLORS.inkMuted, fontSize: 13 }}>No hay productos.</div>}
         {filtered.map((p) => {
           const low = p.stock <= p.minStock;
           return (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 40px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14 }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 68px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14 }}>
               <span>
                 {p.name}
                 {p.barcode && <div className="font-mono" style={{ fontSize: 10, color: COLORS.inkMuted, marginTop: 2 }}>{p.barcode}</div>}
@@ -530,9 +661,14 @@ function Inventario({ products, search, setSearch, onAdd, onScan, onDelete }) {
               <span>
                 <span className="stamp" style={{ color: low ? COLORS.rust : COLORS.sage }}>{low ? 'bajo' : 'ok'}</span>
               </span>
-              <button onClick={() => onDelete(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
-                <Trash2 size={15} />
-              </button>
+              <span style={{ display: 'flex', gap: 10 }}>
+                <button onClick={() => onEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => onDelete(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
+                  <Trash2 size={15} />
+                </button>
+              </span>
             </div>
           );
         })}
@@ -686,6 +822,54 @@ function Facturacion({ month, setMonth, months, billingData, billingTotal, clien
   );
 }
 
+function BackupModal({ lastBackup, daysSinceBackup, onClose, onDownload, onRestore }) {
+  const fileInputRef = useRef(null);
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 380, maxWidth: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <div className="font-display" style={{ fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Cloud size={17} /> Copia de seguridad
+          </div>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 12.5, color: COLORS.inkMuted, marginBottom: 18 }}>
+          {lastBackup
+            ? `Última copia: ${new Date(lastBackup).toLocaleDateString('es-ES')} (hace ${daysSinceBackup} ${daysSinceBackup === 1 ? 'día' : 'días'}).`
+            : 'Todavía no has hecho ninguna copia.'}
+        </div>
+
+        <button onClick={onDownload} style={{ ...submitStyle, marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          <Download size={15} /> Descargar copia (.json)
+        </button>
+        <div style={{ fontSize: 11, color: COLORS.inkMuted, marginTop: -12, marginBottom: 20 }}>
+          Recomendado: guarda el archivo directamente en la carpeta de tu ordenador que sincroniza con Google Drive.
+        </div>
+
+        <div style={{ borderTop: `1px solid ${COLORS.line}`, paddingTop: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Restaurar desde una copia</div>
+          <div style={{ fontSize: 11.5, color: COLORS.inkMuted, marginBottom: 10 }}>
+            Sustituye todos los datos actuales por los del archivo. Úsalo solo si necesitas recuperar la tienda tras perder los datos.
+          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            style={{ width: '100%', background: COLORS.surface, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px', fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            <Upload size={14} /> Elegir archivo de copia
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json"
+            style={{ display: 'none' }}
+            onChange={(e) => { if (e.target.files[0]) onRestore(e.target.files[0]); e.target.value = ''; }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalShell({ title, onClose, children, onSubmit }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
@@ -708,29 +892,29 @@ const inputStyle = { width: '100%', padding: '9px 12px', borderRadius: 8, border
 const labelStyle = { fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 };
 const submitStyle = { width: '100%', background: COLORS.amber, color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 14, fontWeight: 500, cursor: 'pointer' };
 
-function ProductModal({ onClose, onSave }) {
-  const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
-  const [stock, setStock] = useState('');
-  const [minStock, setMinStock] = useState('3');
-  const [barcode, setBarcode] = useState('');
+function ProductModal({ onClose, onSave, initialProduct }) {
+  const [name, setName] = useState(initialProduct?.name || '');
+  const [price, setPrice] = useState(initialProduct ? String(initialProduct.price) : '');
+  const [stock, setStock] = useState(initialProduct ? String(initialProduct.stock) : '');
+  const [minStock, setMinStock] = useState(initialProduct ? String(initialProduct.minStock) : '3');
+  const [barcode, setBarcode] = useState(initialProduct?.barcode || '');
   return (
-    <ModalShell title="Nuevo producto" onClose={onClose} onSubmit={(e) => {
+    <ModalShell title={initialProduct ? 'Editar producto' : 'Nuevo producto'} onClose={onClose} onSubmit={(e) => {
       e.preventDefault();
       if (!name || !price) return;
-      onSave({ id: 'p' + Date.now(), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: parseInt(minStock || '0'), barcode: barcode || undefined });
+      onSave({ id: initialProduct?.id || ('p' + Date.now()), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: parseInt(minStock || '0'), barcode: barcode || undefined });
     }}>
       <label style={labelStyle}>Nombre</label>
       <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} required />
       <label style={labelStyle}>Precio (€)</label>
       <input style={inputStyle} type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} required />
-      <label style={labelStyle}>Stock inicial</label>
+      <label style={labelStyle}>Stock {initialProduct ? 'actual' : 'inicial'}</label>
       <input style={inputStyle} type="number" min="0" value={stock} onChange={(e) => setStock(e.target.value)} />
       <label style={labelStyle}>Aviso de stock bajo (uds)</label>
       <input style={inputStyle} type="number" min="0" value={minStock} onChange={(e) => setMinStock(e.target.value)} />
       <label style={labelStyle}>Código de barras (opcional)</label>
       <input style={inputStyle} value={barcode} onChange={(e) => setBarcode(e.target.value)} placeholder="Escanea o escribe el código" />
-      <button style={submitStyle} type="submit">Guardar producto</button>
+      <button style={submitStyle} type="submit">{initialProduct ? 'Guardar cambios' : 'Guardar producto'}</button>
     </ModalShell>
   );
 }
@@ -758,13 +942,50 @@ function SaleModal({ products, clients, onClose, onSave }) {
   const [productId, setProductId] = useState(products[0]?.id || '');
   const [qty, setQty] = useState('1');
   const [date, setDate] = useState(todayISO());
+  const [savedSale, setSavedSale] = useState(null);
   const product = products.find((p) => p.id === productId);
+
+  const resetForNewSale = () => {
+    setSavedSale(null);
+    setQty('1');
+    setDate(todayISO());
+  };
+
+  if (savedSale) {
+    const savedProduct = products.find((p) => p.id === savedSale.productId);
+    const savedClient = clients.find((c) => c.id === savedSale.clientId);
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
+        <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 360, maxWidth: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <div className="font-display" style={{ fontSize: 17, fontWeight: 600 }}>Venta registrada</div>
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={18} /></button>
+          </div>
+          <div style={{ background: `${COLORS.sage}12`, border: `1px solid ${COLORS.sage}33`, borderRadius: 8, padding: 14, marginBottom: 18, fontSize: 13 }}>
+            <div>{savedProduct?.name} × {savedSale.qty}</div>
+            <div style={{ color: COLORS.inkMuted, fontSize: 12, marginTop: 2 }}>{savedClient?.name}</div>
+            <div className="font-mono" style={{ fontWeight: 700, fontSize: 16, marginTop: 6 }}>{eur(savedSale.total)}</div>
+          </div>
+          <button onClick={() => printSaleTicket(savedSale, savedProduct, savedClient)} style={{ ...submitStyle, marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            🖨️ Imprimir ticket
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={resetForNewSale} style={{ flex: 1, background: COLORS.surface, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px', fontSize: 13, cursor: 'pointer' }}>Otra venta</button>
+            <button onClick={onClose} style={{ flex: 1, background: COLORS.ink, color: COLORS.paper, border: 'none', borderRadius: 8, padding: '9px', fontSize: 13, cursor: 'pointer' }}>Cerrar</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ModalShell title="Registrar venta" onClose={onClose} onSubmit={(e) => {
       e.preventDefault();
       if (!clientId || !productId) return;
       const q = parseInt(qty || '1');
-      onSave({ id: 's' + Date.now(), clientId, productId, qty: q, date, total: +(product.price * q).toFixed(2) });
+      const sale = { id: 's' + Date.now(), clientId, productId, qty: q, date, total: +(product.price * q).toFixed(2) };
+      const ok = onSave(sale);
+      if (ok) setSavedSale(sale);
     }}>
       {clients.length === 0 || products.length === 0 ? (
         <div style={{ fontSize: 13, color: COLORS.inkMuted, marginBottom: 14 }}>Necesitas al menos un cliente y un producto antes de registrar una venta.</div>
@@ -790,7 +1011,7 @@ function SaleModal({ products, clients, onClose, onSave }) {
   );
 }
 
-function ScannerModal({ products, onClose, onIncrement, onCreate }) {
+function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate }) {
   const [value, setValue] = useState('');
   const [pending, setPending] = useState(null);
   const [newName, setNewName] = useState('');
@@ -811,7 +1032,7 @@ function ScannerModal({ products, onClose, onIncrement, onCreate }) {
     const product = products.find((p) => p.barcode === code);
     if (product) {
       onIncrement(product.id);
-      setLog((l) => [{ id: Date.now(), text: `+1 uds · ${product.name}` }, ...l].slice(0, 8));
+      setLog((l) => [{ id: Date.now(), text: `+1 uds · ${product.name}`, productId: product.id }, ...l].slice(0, 8));
     } else {
       setPending(code);
     }
@@ -826,6 +1047,11 @@ function ScannerModal({ products, onClose, onIncrement, onCreate }) {
     setNewName(''); setNewPrice(''); setNewStock('1');
   };
 
+  const handleUndo = (entryId, productId) => {
+    onDecrement(productId);
+    setLog((l) => l.map((entry) => entry.id === entryId ? { ...entry, undone: true } : entry));
+  };
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 380, maxWidth: '100%' }}>
@@ -836,7 +1062,7 @@ function ScannerModal({ products, onClose, onIncrement, onCreate }) {
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}><X size={18} /></button>
         </div>
         <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 16 }}>
-          Cada código escaneado suma 1 unidad de stock. Deja esta ventana abierta y sigue disparando el lector.
+          Cada código escaneado suma 1 unidad de stock. Si te equivocas y escaneas de más, pulsa "deshacer" en esa línea del historial.
         </div>
 
         {!pending ? (
@@ -869,9 +1095,18 @@ function ScannerModal({ products, onClose, onIncrement, onCreate }) {
         )}
 
         {log.length > 0 && (
-          <div style={{ marginTop: 16, borderTop: `1px solid ${COLORS.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ marginTop: 16, borderTop: `1px solid ${COLORS.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
             {log.map((l) => (
-              <div key={l.id} className="font-mono" style={{ fontSize: 11.5, color: COLORS.sage }}>{l.text}</div>
+              <div key={l.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span className="font-mono" style={{ fontSize: 11.5, color: l.undone ? COLORS.inkMuted : COLORS.sage, textDecoration: l.undone ? 'line-through' : 'none' }}>
+                  {l.text}{l.undone ? ' (deshecho)' : ''}
+                </span>
+                {l.productId && !l.undone && (
+                  <button type="button" onClick={() => handleUndo(l.id, l.productId)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.rust, fontSize: 11, textDecoration: 'underline', whiteSpace: 'nowrap' }}>
+                    deshacer
+                  </button>
+                )}
+              </div>
             ))}
           </div>
         )}
