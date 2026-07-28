@@ -556,13 +556,13 @@ export default function TiendaApp() {
               updateAll(newProducts, clients, newSales);
               showToast('Producto devuelto — stock repuesto');
             }}
-            onVoidOrder={(orderId) => {
-              const orderSales = sales.filter((s) => (s.orderId || s.id) === orderId);
+            onVoidOrder={(saleIds) => {
+              const orderSales = sales.filter((s) => saleIds.includes(s.id));
               const newProducts = products.map((p) => {
                 const qty = orderSales.filter((s) => s.productId === p.id).reduce((sum, s) => sum + s.qty, 0);
                 return qty ? { ...p, stock: p.stock + qty } : p;
               });
-              const newSales = sales.filter((s) => (s.orderId || s.id) !== orderId);
+              const newSales = sales.filter((s) => !saleIds.includes(s.id));
               updateAll(newProducts, clients, newSales);
               showToast('Pedido anulado — stock repuesto');
             }}
@@ -1468,11 +1468,11 @@ function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, 
   const orders = useMemo(() => {
     const map = {};
     sales.forEach((s) => {
-      const oid = s.orderId || s.id;
-      if (!map[oid]) map[oid] = { orderId: oid, clientId: s.clientId, date: s.date, items: [] };
-      map[oid].items.push(s);
+      const key = `${s.clientId}__${s.date}`;
+      if (!map[key]) map[key] = { key, clientId: s.clientId, date: s.date, items: [] };
+      map[key].items.push(s);
     });
-    return Object.values(map).sort((a, b) => (b.date + b.orderId).localeCompare(a.date + a.orderId));
+    return Object.values(map).sort((a, b) => (b.date + b.key).localeCompare(a.date + a.key));
   }, [sales]);
 
   const q = search.toLowerCase();
@@ -1502,7 +1502,7 @@ function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, 
           {filtered.map((o) => {
             const total = o.items.reduce((sum, it) => sum + it.total, 0);
             return (
-              <div key={o.orderId} className="receipt" style={{ padding: '22px 20px 16px', borderRadius: 4 }}>
+              <div key={o.key} className="receipt" style={{ padding: '22px 20px 16px', borderRadius: 4 }}>
                 <div style={{ textAlign: 'center', marginBottom: 12 }}>
                   <div className="font-display" style={{ fontWeight: 600, fontSize: 16 }}>{clientMap[o.clientId]?.name || 'Cliente'}</div>
                   <div className="font-mono" style={{ fontSize: 10, color: COLORS.inkMuted, letterSpacing: '0.08em', marginTop: 2 }}>{new Date(o.date).toLocaleDateString('es-ES').toUpperCase()}</div>
@@ -1533,7 +1533,7 @@ function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, 
                   <span className="font-mono" style={{ fontWeight: 700, fontSize: 16 }}>{eur(total)}</span>
                 </div>
                 <button
-                  onClick={() => { if (window.confirm('¿Anular todo el pedido? Se repondrá el stock de todos los productos.')) onVoidOrder(o.orderId); }}
+                  onClick={() => { if (window.confirm('¿Anular todo el pedido? Se repondrá el stock de todos los productos.')) onVoidOrder(o.items.map((it) => it.id)); }}
                   style={{ width: '100%', marginTop: 12, background: 'none', border: `1px solid ${COLORS.rust}55`, color: COLORS.rust, borderRadius: 6, padding: '6px', fontSize: 11.5, cursor: 'pointer' }}
                 >
                   Anular pedido completo
