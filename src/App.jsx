@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil } from 'lucide-react';
+import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil, Tag } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 
 const FONTS = `
@@ -121,6 +121,60 @@ function printCartTicket(salesArr, products, client) {
   openPrintWindow(ticketShell(body));
 }
 
+// Code 128 (subset B) barcode encoder — widths table per ISO/IEC 15417, index = symbol value 0-106
+const CODE128_WIDTHS = ['212222', '222122', '222221', '121223', '121322', '131222', '122213', '122312', '132212', '221213', '221312', '231212', '112232', '122132', '122231', '113222', '123122', '123221', '223211', '221132', '221231', '213212', '223112', '312131', '311222', '321122', '321221', '312212', '322112', '322211', '212123', '212321', '232121', '111323', '131123', '131321', '112313', '132113', '132311', '211313', '231113', '231311', '112133', '112331', '132131', '113123', '113321', '133121', '313121', '211331', '231131', '213113', '213311', '213131', '311123', '311321', '331121', '312113', '312311', '332111', '314111', '221411', '431111', '111224', '111422', '121124', '121421', '141122', '141221', '112214', '112412', '122114', '122411', '142112', '142211', '241211', '221114', '413111', '241112', '134111', '111242', '121142', '121241', '114212', '124112', '124211', '411212', '421112', '421211', '212141', '214121', '412121', '111143', '111341', '131141', '114113', '114311', '411113', '411311', '113141', '114131', '311141', '411131', '211412', '211214', '211232', '2331112'];
+
+function encodeCode128B(text) {
+  const chars = text.split('').filter((ch) => ch.charCodeAt(0) >= 32 && ch.charCodeAt(0) <= 126);
+  const values = chars.map((ch) => ch.charCodeAt(0) - 32);
+  const START_B = 104;
+  let checksum = START_B;
+  values.forEach((v, i) => { checksum += v * (i + 1); });
+  checksum = checksum % 103;
+  return [START_B, ...values, checksum, 106].map((v) => CODE128_WIDTHS[v]).join('');
+}
+
+function barcodeSVG(text, moduleWidth, height) {
+  const widths = encodeCode128B(text).split('').map(Number);
+  let x = 0;
+  const bars = [];
+  widths.forEach((w, i) => {
+    const barWidth = w * moduleWidth;
+    if (i % 2 === 0) bars.push(`<rect x="${x}" y="0" width="${barWidth}" height="${height}" fill="#000"/>`);
+    x += barWidth;
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${height}" width="${x}" height="${height}">${bars.join('')}</svg>`;
+}
+
+function labelShell(bodyHtml) {
+  return `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><style>
+    @page { size: 58mm auto; margin: 0; }
+    * { box-sizing: border-box; }
+    body { width: 50mm; margin: 0 auto; font-family: 'IBM Plex Sans', Arial, sans-serif; }
+    .label { padding: 3mm 2mm; text-align: center; page-break-after: always; }
+    .label:last-child { page-break-after: auto; }
+    .name { font-size: 11px; font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .price { font-size: 14px; font-weight: 700; margin-bottom: 4px; font-family: 'IBM Plex Mono', monospace; }
+    .code-text { font-size: 10px; font-family: 'IBM Plex Mono', monospace; margin-top: 3px; letter-spacing: 1px; }
+    svg { display: block; margin: 0 auto; }
+  </style></head><body>${bodyHtml}</body></html>`;
+}
+
+function printProductLabels(product, copies) {
+  if (!product.barcode) return;
+  const svg = barcodeSVG(product.barcode, 1.6, 40);
+  const oneLabel = `
+    <div class="label">
+      <div class="name">${product.name}</div>
+      <div class="price">${eur(product.price)}</div>
+      ${svg}
+      <div class="code-text">${product.barcode}</div>
+    </div>
+  `;
+  const body = Array.from({ length: copies }).map(() => oneLabel).join('');
+  openPrintWindow(labelShell(body));
+}
+
 
 function openPrintWindow(html) {
   const w = window.open('', '_blank');
@@ -172,6 +226,10 @@ export default function TiendaApp() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [billingMonth, setBillingMonth] = useState(new Date().toISOString().slice(0, 7));
   const [productSearch, setProductSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [labelProduct, setLabelProduct] = useState(null);
+  const [salesSearch, setSalesSearch] = useState('');
+  const [editingSale, setEditingSale] = useState(null);
   const [toast, setToast] = useState('');
 
   useEffect(() => {
@@ -252,6 +310,8 @@ export default function TiendaApp() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const monthSales = useMemo(() => sales.filter((s) => monthKey(s.date) === currentMonth), [sales, currentMonth]);
   const monthRevenue = monthSales.reduce((sum, s) => sum + s.total, 0);
+  const monthCost = monthSales.reduce((sum, s) => sum + (s.cost || 0), 0);
+  const monthMargin = monthRevenue - monthCost;
   const avgTicket = monthSales.length ? monthRevenue / monthSales.length : 0;
   const lowStock = products.filter((p) => p.stock <= p.minStock);
 
@@ -394,6 +454,7 @@ export default function TiendaApp() {
               ['resumen', 'Resumen', TrendingUp],
               ['inventario', 'Inventario', Package],
               ['clientes', 'Clientes', Users],
+              ['ventas', 'Ventas', ShoppingCart],
               ['facturacion', 'Facturación', Receipt],
             ].map(([key, label, Icon]) => (
               <button
@@ -428,6 +489,7 @@ export default function TiendaApp() {
         {tab === 'resumen' && (
           <Resumen
             monthRevenue={monthRevenue}
+            monthMargin={monthMargin}
             monthSalesCount={monthSales.length}
             avgTicket={avgTicket}
             lowStock={lowStock}
@@ -440,9 +502,12 @@ export default function TiendaApp() {
             products={products}
             search={productSearch}
             setSearch={setProductSearch}
+            categoryFilter={categoryFilter}
+            setCategoryFilter={setCategoryFilter}
             onAdd={() => { setEditingProduct(null); setProductOpen(true); }}
             onEdit={(p) => { setEditingProduct(p); setProductOpen(true); }}
             onScan={() => setScannerOpen(true)}
+            onLabel={(p) => setLabelProduct(p)}
             onDelete={(id) => {
               if (sales.some((s) => s.productId === id)) { showToast('No se puede borrar: tiene ventas asociadas'); return; }
               updateAll(products.filter((p) => p.id !== id), clients, sales);
@@ -457,6 +522,39 @@ export default function TiendaApp() {
             onDelete={(id) => {
               if (sales.some((s) => s.clientId === id)) { showToast('No se puede borrar: tiene compras asociadas'); return; }
               updateAll(products, clients.filter((c) => c.id !== id), sales);
+            }}
+          />
+        )}
+        {tab === 'ventas' && (
+          <Ventas
+            sales={sales}
+            clientMap={clientMap}
+            productMap={productMap}
+            search={salesSearch}
+            setSearch={setSalesSearch}
+            editingSale={editingSale}
+            setEditingSale={setEditingSale}
+            onEditSale={(saleId, newQty) => {
+              const sale = sales.find((s) => s.id === saleId);
+              if (!sale) return false;
+              const product = productMap[sale.productId];
+              const availableStock = product.stock + sale.qty;
+              if (newQty > availableStock) { showToast('Stock insuficiente para esa cantidad'); return false; }
+              const newTotal = +(product.price * newQty).toFixed(2);
+              const newCost = +((product.cost || 0) * newQty).toFixed(2);
+              const newSales = sales.map((s) => s.id === saleId ? { ...s, qty: newQty, total: newTotal, cost: newCost } : s);
+              const newProducts = products.map((p) => p.id === product.id ? { ...p, stock: availableStock - newQty } : p);
+              updateAll(newProducts, clients, newSales);
+              showToast('Venta actualizada');
+              return true;
+            }}
+            onVoidSale={(saleId) => {
+              const sale = sales.find((s) => s.id === saleId);
+              if (!sale) return;
+              const newProducts = products.map((p) => p.id === sale.productId ? { ...p, stock: p.stock + sale.qty } : p);
+              const newSales = sales.filter((s) => s.id !== saleId);
+              updateAll(newProducts, clients, newSales);
+              showToast('Venta anulada — stock repuesto');
             }}
           />
         )}
@@ -489,7 +587,7 @@ export default function TiendaApp() {
             }
             const newSales = cartItems.map((item, i) => {
               const product = productMap[item.productId];
-              return { id: 's' + Date.now() + '-' + i, clientId, productId: item.productId, qty: item.qty, date, total: +(product.price * item.qty).toFixed(2) };
+              return { id: 's' + Date.now() + '-' + i, clientId, productId: item.productId, qty: item.qty, date, total: +(product.price * item.qty).toFixed(2), cost: +((product.cost || 0) * item.qty).toFixed(2) };
             });
             const newProducts = products.map((p) => {
               const item = cartItems.find((c) => c.productId === p.id);
@@ -509,6 +607,7 @@ export default function TiendaApp() {
       {productOpen && (
         <ProductModal
           initialProduct={editingProduct}
+          categories={Array.from(new Set(products.map((p) => p.category).filter(Boolean)))}
           onClose={() => { setProductOpen(false); setEditingProduct(null); }}
           onSave={(p) => {
             if (editingProduct) {
@@ -557,6 +656,13 @@ export default function TiendaApp() {
         />
       )}
 
+      {labelProduct && (
+        <LabelModal
+          product={labelProduct}
+          onClose={() => setLabelProduct(null)}
+        />
+      )}
+
       {toast && (
         <div style={{ position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: COLORS.ink, color: COLORS.paper, padding: '10px 18px', borderRadius: 8, fontSize: 13, fontFamily: "'IBM Plex Mono', monospace" }}>
           {toast}
@@ -570,25 +676,30 @@ function Card({ children, style }) {
   return <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.line}`, borderRadius: 10, padding: 20, ...style }}>{children}</div>;
 }
 
-function Resumen({ monthRevenue, monthSalesCount, avgTicket, lowStock, topProducts, chartData }) {
+function Resumen({ monthRevenue, monthMargin, monthSalesCount, avgTicket, lowStock, topProducts, chartData }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 24 }}>
         <span className="font-mono" style={{ fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Este mes</span>
         <span style={{ height: 1, flex: 1, background: COLORS.line }} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 20 }}>
         <Card>
           <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 6 }}>Facturación</div>
-          <div className="font-mono" style={{ fontSize: 28, fontWeight: 600, color: COLORS.sage }}>{eur(monthRevenue)}</div>
+          <div className="font-mono" style={{ fontSize: 26, fontWeight: 600, color: COLORS.sage }}>{eur(monthRevenue)}</div>
+        </Card>
+        <Card>
+          <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 6 }}>Beneficio</div>
+          <div className="font-mono" style={{ fontSize: 26, fontWeight: 600, color: COLORS.amber }}>{eur(monthMargin)}</div>
+          <div style={{ fontSize: 11, color: COLORS.inkMuted, marginTop: 2 }}>{monthRevenue > 0 ? `${Math.round((monthMargin / monthRevenue) * 100)}% margen` : 'sin datos de coste'}</div>
         </Card>
         <Card>
           <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 6 }}>Ventas</div>
-          <div className="font-mono" style={{ fontSize: 28, fontWeight: 600 }}>{monthSalesCount}</div>
+          <div className="font-mono" style={{ fontSize: 26, fontWeight: 600 }}>{monthSalesCount}</div>
         </Card>
         <Card>
           <div style={{ fontSize: 12, color: COLORS.inkMuted, marginBottom: 6 }}>Ticket medio</div>
-          <div className="font-mono" style={{ fontSize: 28, fontWeight: 600 }}>{eur(avgTicket)}</div>
+          <div className="font-mono" style={{ fontSize: 26, fontWeight: 600 }}>{eur(avgTicket)}</div>
         </Card>
       </div>
 
@@ -657,19 +768,30 @@ function Resumen({ monthRevenue, monthSalesCount, avgTicket, lowStock, topProduc
   );
 }
 
-function Inventario({ products, search, setSearch, onAdd, onEdit, onScan, onDelete }) {
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+function Inventario({ products, search, setSearch, categoryFilter, setCategoryFilter, onAdd, onEdit, onScan, onDelete, onLabel }) {
+  const categories = Array.from(new Set(products.map((p) => p.category).filter(Boolean))).sort();
+  const filtered = products
+    .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+    .filter((p) => !categoryFilter || p.category === categoryFilter);
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 12 }}>
-        <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
-          <Search size={15} style={{ position: 'absolute', left: 12, top: 11, color: COLORS.inkMuted }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar producto…"
-            style={{ width: '100%', padding: '9px 12px 9px 34px', borderRadius: 8, border: `1px solid ${COLORS.line}`, fontSize: 13, background: COLORS.surface, boxSizing: 'border-box' }}
-          />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, flex: 1, minWidth: 220 }}>
+          <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
+            <Search size={15} style={{ position: 'absolute', left: 12, top: 11, color: COLORS.inkMuted }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar producto…"
+              style={{ width: '100%', padding: '9px 12px 9px 34px', borderRadius: 8, border: `1px solid ${COLORS.line}`, fontSize: 13, background: COLORS.surface, boxSizing: 'border-box' }}
+            />
+          </div>
+          {categories.length > 0 && (
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={{ padding: '9px 12px', borderRadius: 8, border: `1px solid ${COLORS.line}`, fontSize: 13, background: COLORS.surface }}>
+              <option value="">Todas las categorías</option>
+              {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onScan} style={{ background: COLORS.surface, color: COLORS.ink, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px 16px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -682,24 +804,33 @@ function Inventario({ products, search, setSearch, onAdd, onEdit, onScan, onDele
       </div>
 
       <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 68px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
-          <span>Producto</span><span>Precio</span><span>Stock</span><span>Estado</span><span></span>
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
+          <span>Producto</span><span>Precio</span><span>Coste</span><span>Stock</span><span>Estado</span><span></span>
         </div>
         {filtered.length === 0 && <div style={{ padding: 24, color: COLORS.inkMuted, fontSize: 13 }}>No hay productos.</div>}
         {filtered.map((p) => {
           const low = p.stock <= p.minStock;
           return (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 0.8fr 68px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14 }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 0.8fr 92px', padding: '14px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 14 }}>
               <span>
                 {p.name}
-                {p.barcode && <div className="font-mono" style={{ fontSize: 10, color: COLORS.inkMuted, marginTop: 2 }}>{p.barcode}</div>}
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+                  {p.barcode && <span className="font-mono" style={{ fontSize: 10, color: COLORS.inkMuted }}>{p.barcode}</span>}
+                  {p.category && <span style={{ fontSize: 10, color: COLORS.amber, background: `${COLORS.amber}15`, borderRadius: 4, padding: '1px 6px' }}>{p.category}</span>}
+                </div>
               </span>
               <span className="font-mono">{eur(p.price)}</span>
+              <span className="font-mono" style={{ color: COLORS.inkMuted }}>{p.cost ? eur(p.cost) : '—'}</span>
               <span className="font-mono">{p.stock} uds</span>
               <span>
                 <span className="stamp" style={{ color: low ? COLORS.rust : COLORS.sage }}>{low ? 'bajo' : 'ok'}</span>
               </span>
-              <span style={{ display: 'flex', gap: 10 }}>
+              <span style={{ display: 'flex', gap: 8 }}>
+                {p.barcode && (
+                  <button onClick={() => onLabel(p)} title="Imprimir etiqueta" style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
+                    <Tag size={14} />
+                  </button>
+                )}
                 <button onClick={() => onEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
                   <Pencil size={14} />
                 </button>
@@ -930,9 +1061,11 @@ const inputStyle = { width: '100%', padding: '9px 12px', borderRadius: 8, border
 const labelStyle = { fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 5 };
 const submitStyle = { width: '100%', background: COLORS.amber, color: '#fff', border: 'none', borderRadius: 8, padding: '10px', fontSize: 14, fontWeight: 500, cursor: 'pointer' };
 
-function ProductModal({ onClose, onSave, initialProduct }) {
+function ProductModal({ onClose, onSave, initialProduct, categories }) {
   const [name, setName] = useState(initialProduct?.name || '');
   const [price, setPrice] = useState(initialProduct ? String(initialProduct.price) : '');
+  const [cost, setCost] = useState(initialProduct?.cost ? String(initialProduct.cost) : '');
+  const [category, setCategory] = useState(initialProduct?.category || '');
   const [stock, setStock] = useState(initialProduct ? String(initialProduct.stock) : '');
   const [minStock, setMinStock] = useState(initialProduct ? String(initialProduct.minStock) : '3');
   const [barcode, setBarcode] = useState(initialProduct?.barcode || '');
@@ -940,12 +1073,25 @@ function ProductModal({ onClose, onSave, initialProduct }) {
     <ModalShell title={initialProduct ? 'Editar producto' : 'Nuevo producto'} onClose={onClose} onSubmit={(e) => {
       e.preventDefault();
       if (!name || !price) return;
-      onSave({ id: initialProduct?.id || ('p' + Date.now()), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: parseInt(minStock || '0'), barcode: barcode || undefined });
+      onSave({ id: initialProduct?.id || ('p' + Date.now()), name, price: parseFloat(price), cost: cost ? parseFloat(cost) : 0, category: category || undefined, stock: parseInt(stock || '0'), minStock: parseInt(minStock || '0'), barcode: barcode || undefined });
     }}>
       <label style={labelStyle}>Nombre</label>
       <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} required />
-      <label style={labelStyle}>Precio (€)</label>
-      <input style={inputStyle} type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} required />
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Precio de venta (€)</label>
+          <input style={inputStyle} type="number" step="0.01" min="0" value={price} onChange={(e) => setPrice(e.target.value)} required />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Precio de coste (€)</label>
+          <input style={inputStyle} type="number" step="0.01" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" />
+        </div>
+      </div>
+      <label style={labelStyle}>Categoría (opcional)</label>
+      <input style={inputStyle} list="category-options" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ej. bebidas, limpieza…" />
+      <datalist id="category-options">
+        {(categories || []).map((c) => <option key={c} value={c} />)}
+      </datalist>
       <label style={labelStyle}>Stock {initialProduct ? 'actual' : 'inicial'}</label>
       <input style={inputStyle} type="number" min="0" value={stock} onChange={(e) => setStock(e.target.value)} />
       <label style={labelStyle}>Aviso de stock bajo (uds)</label>
@@ -1304,5 +1450,106 @@ function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate })
         )}
       </div>
     </div>
+  );
+}
+
+function Ventas({ sales, clientMap, productMap, search, setSearch, editingSale, setEditingSale, onEditSale, onVoidSale }) {
+  const filtered = sales
+    .filter((s) => {
+      const q = search.toLowerCase();
+      if (!q) return true;
+      return (clientMap[s.clientId]?.name || '').toLowerCase().includes(q) || (productMap[s.productId]?.name || '').toLowerCase().includes(q);
+    })
+    .sort((a, b) => (b.date + b.id).localeCompare(a.date + a.id));
+
+  return (
+    <div>
+      <div style={{ position: 'relative', maxWidth: 320, marginBottom: 20 }}>
+        <Search size={15} style={{ position: 'absolute', left: 12, top: 11, color: COLORS.inkMuted }} />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Buscar por cliente o producto…"
+          style={{ width: '100%', padding: '9px 12px 9px 34px', borderRadius: 8, border: `1px solid ${COLORS.line}`, fontSize: 13, background: COLORS.surface, boxSizing: 'border-box' }}
+        />
+      </div>
+
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr 0.7fr 1fr 70px', padding: '10px 20px', fontSize: 11, color: COLORS.inkMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${COLORS.line}` }}>
+          <span>Fecha</span><span>Cliente</span><span>Producto</span><span>Cant.</span><span>Total</span><span></span>
+        </div>
+        {filtered.length === 0 && <div style={{ padding: 24, color: COLORS.inkMuted, fontSize: 13 }}>No hay ventas que coincidan.</div>}
+        {filtered.map((s) => (
+          <div key={s.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr 1.4fr 0.7fr 1fr 70px', padding: '12px 20px', alignItems: 'center', borderBottom: `1px solid ${COLORS.line}`, fontSize: 13.5 }}>
+            <span className="font-mono" style={{ fontSize: 12.5 }}>{new Date(s.date).toLocaleDateString('es-ES')}</span>
+            <span>{clientMap[s.clientId]?.name || '—'}</span>
+            <span>{productMap[s.productId]?.name || '—'}</span>
+            <span className="font-mono">{s.qty}</span>
+            <span className="font-mono" style={{ fontWeight: 600 }}>{eur(s.total)}</span>
+            <span style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => setEditingSale(s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}>
+                <Pencil size={14} />
+              </button>
+              <button
+                onClick={() => { if (window.confirm('¿Anular esta venta? Se repondrá el stock del producto.')) onVoidSale(s.id); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: COLORS.inkMuted }}
+              >
+                <Trash2 size={15} />
+              </button>
+            </span>
+          </div>
+        ))}
+      </Card>
+
+      {editingSale && (
+        <EditSaleModal
+          sale={editingSale}
+          product={productMap[editingSale.productId]}
+          onClose={() => setEditingSale(null)}
+          onSave={(newQty) => { const ok = onEditSale(editingSale.id, newQty); if (ok) setEditingSale(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditSaleModal({ sale, product, onClose, onSave }) {
+  const [qty, setQty] = useState(String(sale.qty));
+  const availableStock = (product?.stock || 0) + sale.qty;
+  return (
+    <ModalShell title="Editar venta" onClose={onClose} onSubmit={(e) => {
+      e.preventDefault();
+      const q = parseInt(qty || '0');
+      if (q < 1) return;
+      onSave(q);
+    }}>
+      <div style={{ fontSize: 13, marginBottom: 14 }}>
+        <div style={{ fontWeight: 600 }}>{product?.name || '—'}</div>
+        <div style={{ color: COLORS.inkMuted, fontSize: 12, marginTop: 2 }}>Disponible para esta venta: {availableStock} uds</div>
+      </div>
+      <label style={labelStyle}>Cantidad</label>
+      <input style={inputStyle} type="number" min="1" max={availableStock} value={qty} onChange={(e) => setQty(e.target.value)} />
+      {product && <div style={{ fontSize: 13, color: COLORS.inkMuted, marginBottom: 14 }}>Nuevo total: <strong className="font-mono" style={{ color: COLORS.ink }}>{eur(product.price * parseInt(qty || '0'))}</strong></div>}
+      <button style={submitStyle} type="submit">Guardar cambios</button>
+    </ModalShell>
+  );
+}
+
+function LabelModal({ product, onClose }) {
+  const [copies, setCopies] = useState('1');
+  return (
+    <ModalShell title="Imprimir etiqueta" onClose={onClose} onSubmit={(e) => {
+      e.preventDefault();
+      printProductLabels(product, Math.max(1, parseInt(copies || '1')));
+      onClose();
+    }}>
+      <div style={{ fontSize: 13, marginBottom: 14 }}>
+        <div style={{ fontWeight: 600 }}>{product.name}</div>
+        <div className="font-mono" style={{ color: COLORS.inkMuted, fontSize: 12, marginTop: 2 }}>{product.barcode}</div>
+      </div>
+      <label style={labelStyle}>Número de etiquetas</label>
+      <input style={inputStyle} type="number" min="1" value={copies} onChange={(e) => setCopies(e.target.value)} />
+      <button style={submitStyle} type="submit"><Tag size={14} style={{ marginRight: 6, verticalAlign: -2 }} />Imprimir</button>
+    </ModalShell>
   );
 }
