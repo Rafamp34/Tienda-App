@@ -285,6 +285,26 @@ export default function TiendaApp() {
     })();
   }, []);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('store-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, async () => {
+        const { data } = await supabase.from('products').select('*');
+        if (data) setProducts(data.map(productFromDb));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, async () => {
+        const { data } = await supabase.from('clients').select('*');
+        if (data) setClients(data.map(clientFromDb));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, async () => {
+        const { data } = await supabase.from('sales').select('*');
+        if (data) setSales(data.map(saleFromDb));
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
   const syncTable = async (table, oldRows, newRows, toDb) => {
     const newIds = new Set(newRows.map((r) => r.id));
     const oldIds = oldRows.map((r) => r.id).filter((id) => !newIds.has(id));
