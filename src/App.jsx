@@ -727,6 +727,7 @@ export default function TiendaApp() {
       {scannerOpen && (
         <ScannerModal
           products={products}
+          categories={Array.from(new Set(products.map((p) => p.category).filter(Boolean)))}
           onClose={() => setScannerOpen(false)}
           onIncrement={(id) => {
             const next = products.map((p) => p.id === id ? { ...p, stock: p.stock + 1 } : p);
@@ -736,8 +737,8 @@ export default function TiendaApp() {
             const next = products.map((p) => p.id === id ? { ...p, stock: Math.max(0, p.stock - 1) } : p);
             updateAll(next, clients, sales);
           }}
-          onCreate={(barcode, { name, price, stock }) => {
-            const product = { id: 'p' + Date.now(), name, price: parseFloat(price), stock: parseInt(stock || '0'), minStock: 3, barcode };
+          onCreate={(barcode, { name, price, cost, category, stock }) => {
+            const product = { id: 'p' + Date.now(), name, price: parseFloat(price), cost: cost ? parseFloat(cost) : 0, category: category || undefined, stock: parseInt(stock || '0'), minStock: 3, barcode };
             updateAll([...products, product], clients, sales);
             return product;
           }}
@@ -1449,12 +1450,15 @@ function SaleModal({ products, clients, onClose, onSaveCart, onCreateProduct }) 
   );
 }
 
-function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate }) {
+function ScannerModal({ products, categories, onClose, onIncrement, onDecrement, onCreate }) {
   const [value, setValue] = useState('');
   const [pending, setPending] = useState(null);
   const [newName, setNewName] = useState('');
   const [newPrice, setNewPrice] = useState('');
+  const [newCost, setNewCost] = useState('');
+  const [newCategory, setNewCategory] = useState('');
   const [newStock, setNewStock] = useState('1');
+  const [newMinStock, setNewMinStock] = useState('3');
   const [log, setLog] = useState([]);
   const inputRef = useRef(null);
 
@@ -1479,10 +1483,10 @@ function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate })
   const handleCreate = (e) => {
     e.preventDefault();
     if (!newName || !newPrice) return;
-    onCreate(pending, { name: newName, price: newPrice, stock: newStock });
+    onCreate(pending, { name: newName, price: newPrice, cost: newCost, category: newCategory, stock: newStock, minStock: newMinStock });
     setLog((l) => [{ id: Date.now(), text: `Nuevo producto · ${newName}` }, ...l].slice(0, 8));
     setPending(null);
-    setNewName(''); setNewPrice(''); setNewStock('1');
+    setNewName(''); setNewPrice(''); setNewCost(''); setNewCategory(''); setNewStock('1'); setNewMinStock('3');
   };
 
   const handleUndo = (entryId, productId) => {
@@ -1492,7 +1496,7 @@ function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate })
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#00000055', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 16 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 380, maxWidth: '100%' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: COLORS.surface, borderRadius: 12, padding: 24, width: 380, maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
           <div className="font-display" style={{ fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Barcode size={17} /> Escanear
@@ -1521,10 +1525,31 @@ function ScannerModal({ products, onClose, onIncrement, onDecrement, onCreate })
             </div>
             <label style={labelStyle}>Nombre</label>
             <input style={inputStyle} value={newName} onChange={(e) => setNewName(e.target.value)} autoFocus required />
-            <label style={labelStyle}>Precio (€)</label>
-            <input style={inputStyle} type="number" step="0.01" min="0" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} required />
-            <label style={labelStyle}>Stock inicial</label>
-            <input style={{ ...inputStyle, marginBottom: 10 }} type="number" min="0" value={newStock} onChange={(e) => setNewStock(e.target.value)} />
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Precio venta (€)</label>
+                <input style={inputStyle} type="number" step="0.01" min="0" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} required />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Precio coste (€)</label>
+                <input style={inputStyle} type="number" step="0.01" min="0" value={newCost} onChange={(e) => setNewCost(e.target.value)} placeholder="0.00" />
+              </div>
+            </div>
+            <label style={labelStyle}>Categoría (opcional)</label>
+            <input style={inputStyle} list="scanner-category-options" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="Ej. bebidas, limpieza…" />
+            <datalist id="scanner-category-options">
+              {(categories || []).map((c) => <option key={c} value={c} />)}
+            </datalist>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Stock inicial</label>
+                <input style={inputStyle} type="number" min="0" value={newStock} onChange={(e) => setNewStock(e.target.value)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Aviso stock bajo</label>
+                <input style={{ ...inputStyle, marginBottom: 10 }} type="number" min="0" value={newMinStock} onChange={(e) => setNewMinStock(e.target.value)} />
+              </div>
+            </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" onClick={() => setPending(null)} style={{ flex: 1, background: COLORS.surface, border: `1px solid ${COLORS.line}`, borderRadius: 8, padding: '9px', fontSize: 13, cursor: 'pointer' }}>Cancelar</button>
               <button type="submit" style={{ flex: 1, ...submitStyle }}>Crear</button>
