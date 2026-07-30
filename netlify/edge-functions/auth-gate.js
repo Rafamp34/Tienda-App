@@ -72,10 +72,23 @@ function loginPage({ error } = {}) {
 </body></html>`;
 }
 
+function getEnv(key) {
+  try {
+    if (typeof Netlify !== 'undefined' && Netlify.env) {
+      const v = Netlify.env.get(key);
+      if (v) return v;
+    }
+  } catch {}
+  try {
+    if (typeof Deno !== 'undefined' && Deno.env) return Deno.env.get(key);
+  } catch {}
+  return undefined;
+}
+
 export default async (request, context) => {
   const url = new URL(request.url);
-  const password = Deno.env.get('SITE_PASSWORD');
-  const secret = Deno.env.get('SITE_AUTH_SECRET');
+  const password = getEnv('SITE_PASSWORD');
+  const secret = getEnv('SITE_AUTH_SECRET');
 
   if (!password || !secret) {
     return new Response(

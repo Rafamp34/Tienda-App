@@ -1,6 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Package, Users, Receipt, TrendingUp, Plus, X, Trash2, AlertTriangle, Search, ShoppingCart, ChevronDown, Barcode, Download, Upload, Cloud, Pencil, Tag, LogOut } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
+import { supabase } from './lib/supabaseClient.js';
+
+const productToDb = (p) => ({ id: p.id, name: p.name, price: p.price, cost: p.cost || 0, category: p.category || null, stock: p.stock, min_stock: p.minStock, barcode: p.barcode || null });
+const productFromDb = (r) => ({ id: r.id, name: r.name, price: Number(r.price), cost: Number(r.cost) || 0, category: r.category || undefined, stock: r.stock, minStock: r.min_stock, barcode: r.barcode || undefined });
+
+const clientToDb = (c) => ({ id: c.id, name: c.name, phone: c.phone || null });
+const clientFromDb = (r) => ({ id: r.id, name: r.name, phone: r.phone || undefined });
+
+const saleToDb = (s) => ({ id: s.id, order_id: s.orderId || null, client_id: s.clientId, product_id: s.productId, qty: s.qty, date: s.date, total: s.total, cost: s.cost || 0 });
+const saleFromDb = (r) => ({ id: r.id, orderId: r.order_id || undefined, clientId: r.client_id, productId: r.product_id, qty: r.qty, date: r.date, total: Number(r.total), cost: Number(r.cost) || 0 });
 
 const FONTS = `
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
@@ -237,17 +247,33 @@ export default function TiendaApp() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await window.storage.get('store-data', false);
-        const data = JSON.parse(res.value);
-        setProducts(data.products || []);
-        setClients(data.clients || []);
-        setSales(data.sales || []);
-      } catch {
-        const seeded = { ...SEED, sales: seedSales() };
-        setProducts(seeded.products);
-        setClients(seeded.clients);
-        setSales(seeded.sales);
-        try { await window.storage.set('store-data', JSON.stringify(seeded), false); } catch {}
+        const [{ data: prodData, error: e1 }, { data: cliData, error: e2 }, { data: saleData, error: e3 }] = await Promise.all([
+          supabase.from('products').select('*'),
+          supabase.from('clients').select('*'),
+          supabase.from('sales').select('*'),
+        ]);
+        if (e1) throw e1;
+        if (e2) throw e2;
+        if (e3) throw e3;
+
+        if (prodData.length === 0 && cliData.length === 0 && saleData.length === 0) {
+          const seeded = { ...SEED, sales: seedSales() };
+          await Promise.all([
+            supabase.from('products').upsert(seeded.products.map(productToDb)),
+            supabase.from('clients').upsert(seeded.clients.map(clientToDb)),
+            supabase.from('sales').upsert(seeded.sales.map(saleToDb)),
+          ]);
+          setProducts(seeded.products);
+          setClients(seeded.clients);
+          setSales(seeded.sales);
+        } else {
+          setProducts(prodData.map(productFromDb));
+          setClients(cliData.map(clientFromDb));
+          setSales(saleData.map(saleFromDb));
+        }
+      } catch (err) {
+        console.error('Error cargando datos de Supabase:', err);
+        showToast('No se pudo conectar con la base de datos');
       }
       setLoading(false);
     })();
@@ -259,8 +285,16 @@ export default function TiendaApp() {
     })();
   }, []);
 
-  const persist = async (next) => {
-    try { await window.storage.set('store-data', JSON.stringify(next), false); } catch {}
+  const syncTable = async (table, oldRows, newRows, toDb) => {
+    const newIds = new Set(newRows.map((r) => r.id));
+    const oldIds = oldRows.map((r) => r.id).filter((id) => !newIds.has(id));
+    try {
+      if (oldIds.length) await supabase.from(table).delete().in('id', oldIds);
+      if (newRows.length) await supabase.from(table).upsert(newRows.map(toDb));
+    } catch (err) {
+      console.error(`Error sincronizando ${table}:`, err);
+      showToast('Error guardando en la base de datos — revisa tu conexión');
+    }
   };
 
   const showToast = (msg) => {
@@ -269,8 +303,10 @@ export default function TiendaApp() {
   };
 
   const updateAll = (p, c, s) => {
+    syncTable('products', products, p, productToDb);
+    syncTable('clients', clients, c, clientToDb);
+    syncTable('sales', sales, s, saleToDb);
     setProducts(p); setClients(c); setSales(s);
-    persist({ products: p, clients: c, sales: s });
   };
 
   const daysSinceBackup = lastBackup ? Math.floor((Date.now() - new Date(lastBackup).getTime()) / 86400000) : null;
